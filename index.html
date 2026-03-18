@@ -1119,11 +1119,81 @@
                                         <input v-model.number="settings.maxRetries" type="range" min="0" max="5" step="1" class="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-teal-500 hover:accent-teal-400 transition-all">
                                     </div>
                                     
-                                    <!-- Image Key -->
-                                    <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
-                                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">自动生图密钥</label>
-                                        <input v-model="settings.imageGenKey" type="password" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm" placeholder="STD-...">
+                                    <!-- Image Gen Service Mode Toggle (Tab切换) -->
+                                    <div class="col-span-1 md:col-span-2 bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200">
+                                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">生图服务</label>
+                                        <div class="bg-gray-100 p-1 rounded-lg flex shadow-inner relative">
+                                            <!-- Sliding Indicator -->
+                                            <div class="absolute inset-y-1 w-[calc(33.33%-4px)] bg-white rounded-md shadow-sm ring-1 ring-black/5 transition-all duration-300 ease-out z-0"
+                                                 :class="settings.imageGenMode === 'std' ? 'left-1' : settings.imageGenMode === 'midjourney' ? 'left-[calc(33.33%+2px)]' : 'left-[calc(66.66%+2px)]'"></div>
+                                            
+                                            <button @click="settings.imageGenMode = 'std'" :class="['relative z-10 flex-1 py-2 text-xs font-bold rounded-md transition-colors duration-200 flex items-center justify-center gap-1', settings.imageGenMode === 'std' ? 'text-teal-600' : 'text-gray-500 hover:text-gray-700']">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                                STD 公益
+                                            </button>
+                                            <button @click="settings.imageGenMode = 'midjourney'" :class="['relative z-10 flex-1 py-2 text-xs font-bold rounded-md transition-colors duration-200 flex items-center justify-center gap-1', settings.imageGenMode === 'midjourney' ? 'text-teal-600' : 'text-gray-500 hover:text-gray-700']">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg>
+                                                Midjourney
+                                            </button>
+                                            <button @click="settings.imageGenMode = 'openai'" :class="['relative z-10 flex-1 py-2 text-xs font-bold rounded-md transition-colors duration-200 flex items-center justify-center gap-1', settings.imageGenMode === 'openai' ? 'text-teal-600' : 'text-gray-500 hover:text-gray-700']">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                                                OpenAI
+                                            </button>
+                                        </div>
                                     </div>
+
+                                    <!-- Dynamic Image Gen Config based on Mode -->
+                                    <!-- STD Mode -->
+                                    <template v-if="settings.imageGenMode === 'std'">
+                                        <!-- Image Key -->
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">STD 生图密钥</label>
+                                            <input v-model="settings.imageGenKey" type="password" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm" placeholder="STD-...">
+                                        </div>
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">STD 模型</label>
+                                            <select v-model="settings.imageGenServices.std.model" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm">
+                                                <option value="nai-diffusion-4-5-full">NAI Diffusion 4.5 Full</option>
+                                                <option value="nai-diffusion-4-5-fast">NAI Diffusion 4.5 Fast</option>
+                                                <option value="nai-diffusion-3-full">NAI Diffusion 3 Full</option>
+                                            </select>
+                                        </div>
+                                    </template>
+
+                                    <!-- Midjourney Mode -->
+                                    <template v-else-if="settings.imageGenMode === 'midjourney'">
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center col-span-1 md:col-span-2">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Base URL</label>
+                                            <input v-model="settings.imageGenServices.midjourney.baseUrl" type="text" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono" placeholder="https://your-midjourney-proxy.com">
+                                        </div>
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">API Key</label>
+                                            <input v-model="settings.imageGenServices.midjourney.apiKey" type="password" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono" placeholder="mj-...">
+                                        </div>
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">模型</label>
+                                            <input v-model="settings.imageGenServices.midjourney.model" type="text" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm" placeholder="midjourney">
+                                        </div>
+                                    </template>
+
+                                    <!-- OpenAI Mode -->
+                                    <template v-else-if="settings.imageGenMode === 'openai'">
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center col-span-1 md:col-span-2">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Base URL</label>
+                                            <input v-model="settings.imageGenServices.openai.baseUrl" type="text" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono" placeholder="https://api.openai.com/v1">
+                                        </div>
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">API Key</label>
+                                            <input v-model="settings.imageGenServices.openai.apiKey" type="password" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono" placeholder="sk-...">
+                                        </div>
+                                        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">模型</label>
+                                            <select v-model="settings.imageGenServices.openai.model" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm">
+                                                <option value="dall-e-3">DALL-E 3</option>
+                                                <option value="dall-e-2">DALL-E 2</option>
+                                            </select>
+                                        </div>
+                                    </template>
 
                                     <!-- Image Style -->
                                     <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200 flex flex-col justify-center">

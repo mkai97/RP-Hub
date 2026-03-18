@@ -243,7 +243,31 @@ const { createApp, ref, reactive, computed, onMounted, watch, nextTick } = Vue;
                     qualityModel: DEFAULT_API_CONFIG.qualityModel,
                     balancedModel: DEFAULT_API_CONFIG.balancedModel,
                     fastModel: DEFAULT_API_CONFIG.fastModel,
-                    suggestionModel: DEFAULT_API_CONFIG.suggestionModel
+                    suggestionModel: DEFAULT_API_CONFIG.suggestionModel,
+                    // ==================== 生图服务配置 ====================
+                    // 生图服务模式：'std' | 'midjourney' | 'openai'
+                    imageGenMode: 'std',
+                    // 三种生图服务商的配置
+                    imageGenServices: {
+                        // STD 公益服务（默认）
+                        std: {
+                            baseUrl: 'https://std.loliyc.com',
+                            apiKey: '', // 使用 imageGenKey
+                            model: 'nai-diffusion-4-5-full'
+                        },
+                        // Midjourney 代理服务
+                        midjourney: {
+                            baseUrl: '',
+                            apiKey: '',
+                            model: 'midjourney'
+                        },
+                        // OpenAI DALL-E 服务
+                        openai: {
+                            baseUrl: '',
+                            apiKey: '',
+                            model: 'dall-e-3'
+                        }
+                    }
                 });
 
                 const syncSettingsToGenerator = () => {
@@ -1614,23 +1638,69 @@ ${rawHtml}
                     }
                 };
 
+                /**
+                 * 检查生图服务连接状态
+                 * 根据当前 imageGenMode 检测对应服务的可用性
+                 */
                 const checkImageGenStatus = async () => {
                     imageGenStatus.value = 'checking';
+                    const mode = settings.imageGenMode;
+                    const services = settings.imageGenServices;
+                    
                     try {
-                         const controller = new AbortController();
-                         const id = setTimeout(() => controller.abort(), 10000);
-                         const startTime = performance.now();
-                         
-                         await fetch('https://std.loliyc.com', { 
-                             method: 'HEAD', 
-                             mode: 'no-cors',
-                             signal: controller.signal 
-                         });
-                         clearTimeout(id);
-                         const endTime = performance.now();
-                         
-                         imageGenStatus.value = 'connected';
-                         imageGenLatency.value = Math.round(endTime - startTime);
+                        const controller = new AbortController();
+                        const id = setTimeout(() => controller.abort(), 10000);
+                        const startTime = performance.now();
+                        
+                        let url = '';
+                        
+                        // 根据模式选择检测的 URL
+                        if (mode === 'std') {
+                            // STD 服务
+                            url = 'https://std.loliyc.com';
+                            await fetch(url, { 
+                                method: 'HEAD', 
+                                mode: 'no-cors',
+                                signal: controller.signal 
+                            });
+                        } else if (mode === 'midjourney') {
+                            // Midjourney 代理服务
+                            url = services.midjourney.baseUrl || 'https://your-midjourney-proxy.com';
+                            // 尝试访问健康检查端点
+                            try {
+                                await fetch(`${url}/v1/mj/health`, {
+                                    method: 'GET',
+                                    headers: {
+                                        'Authorization': `Bearer ${services.midjourney.apiKey}`
+                                    },
+                                    signal: controller.signal
+                                });
+                            } catch (e) {
+                                // 如果没有健康检查端点，尝试直接访问根路径
+                                await fetch(url, {
+                                    method: 'HEAD',
+                                    signal: controller.signal
+                                });
+                            }
+                        } else if (mode === 'openai') {
+                            // OpenAI 兼容服务
+                            url = services.openai.baseUrl || 'https://api.openai.com/v1';
+                            // 检测 /v1/models 端点
+                            const checkUrl = url.endsWith('/v1') ? `${url}/models` : `${url}/v1/models`;
+                            await fetch(checkUrl, {
+                                method: 'GET',
+                                headers: {
+                                    'Authorization': `Bearer ${services.openai.apiKey}`
+                                },
+                                signal: controller.signal
+                            });
+                        }
+                        
+                        clearTimeout(id);
+                        const endTime = performance.now();
+                        
+                        imageGenStatus.value = 'connected';
+                        imageGenLatency.value = Math.round(endTime - startTime);
                     } catch (e) {
                         console.warn('Image API Status Check Failed:', e);
                         imageGenStatus.value = 'error';
@@ -2735,20 +2805,60 @@ ${rawHtml}
                     });
                 };
 
-                const enforceSpecialRules = () => {
-                    const imageGenToken = settings.imageGenKey ? settings.imageGenKey : 'STD-QMqT4lxiWqWMVneiePiE';
+                /**
+                 * 根据生图服务模式生成对应的图片替换 HTML
+                 * @param {string} prompt - 图片提示词 (从正则匹配中获取)
+                 * @returns {string} 替换用的 HTML 字符串
+                 */
+                const getImageGenReplacement = (prompt) => {
+                    const mode = settings.imageGenMode;
+                    const services = settings.imageGenServices;
                     
+                    // STD 公益服务 (默认)
+                    if (mode === 'std') {
+                        const imageGenToken = settings.imageGenKey ? settings.imageGenKey : 'STD-QMqT4lxiWqWMVneiePiE';
+                        const defaultArtists = '[[[artist:dishwasher1910]]], {{yd_(orange_maru)}}, [artist:ciloranko], [artist:sho_(sho_lwlw)], [ningen mame], year 2024,';
+                        const r18Artists = '{{artist:yd_(orange maru)}}, nixeu, {ikuchan kaoru}, cutesexyrobutts, redrop, [[artist:kojima saya]], lam_(ramdayo), oekakizuki, qiandaiyiyu,';
+                        const targetArtists = settings.imageStyle === 'r18' ? r18Artists : defaultArtists;
+                        
+                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(204,229,255,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><img src="https://std.loliyc.com/generate?tag=' + prompt + '&token=' + imageGenToken + '&model=' + services.std.model + '&artist=' + targetArtists + '&size=' + settings.imageSize + '&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}}&nocache=0&noise_schedule=karras"  alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; transition: transform 0.3s ease; position: relative; z-index: 1;"></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF);}50% {background-image: linear-gradient(225deg, #FFC9D9, #CCE5FF);}100% {background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF);}}</style>';
+                    }
+                    
+                    // Midjourney 代理服务
+                    if (mode === 'midjourney') {
+                        const baseUrl = services.midjourney.baseUrl || 'https://your-midjourney-proxy.com';
+                        const apiKey = services.midjourney.apiKey || 'your-api-key';
+                        // Midjourney 使用异步任务方式，返回任务ID后需要轮询获取结果
+                        // 这里生成一个占位图，点击后触发实际的API调用
+                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(159,226,191,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><div class="mj-trigger" data-prompt="' + prompt + '" data-baseurl="' + baseUrl + '" data-apikey="' + apiKey + '" onclick="window.triggerMidjourneyGen(this)" style="cursor:pointer;padding:40px;text-align:center;"><div style="font-size:48px;margin-bottom:10px;">🎨</div><div style="color:#333;font-weight:bold;">点击生成图片</div><div style="color:#666;font-size:12px;margin-top:5px;">Mode: Midjourney</div></div></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}50% {background-image: linear-gradient(225deg, #9FE2BF, #7FFFD4);}100% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}}</style>';
+                    }
+                    
+                    // OpenAI DALL-E 服务
+                    if (mode === 'openai') {
+                        const baseUrl = services.openai.baseUrl || 'https://api.openai.com/v1';
+                        const apiKey = services.openai.apiKey || 'your-api-key';
+                        // OpenAI DALL-E 也是异步的，生成点击触发
+                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #87CEEB, #B0E0E6); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(135,206,235,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><div class="dalle-trigger" data-prompt="' + prompt + '" data-baseurl="' + baseUrl + '" data-apikey="' + apiKey + '" data-model="' + services.openai.model + '" onclick="window.triggerDalleGen(this)" style="cursor:pointer;padding:40px;text-align:center;"><div style="font-size:48px;margin-bottom:10px;">🖼️</div><div style="color:#333;font-weight:bold;">点击生成图片</div><div style="color:#666;font-size:12px;margin-top:5px;">Model: ' + services.openai.model + '</div></div></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #87CEEB, #B0E0E6);}50% {background-image: linear-gradient(225deg, #87CEEB, #B0E0E6);}100% {background-image: linear-gradient(45deg, #87CEEB, #B0E0E6);}}</style>';
+                    }
+                    
+                    // 默认返回 STD 模式
+                    return '';
+                };
+
+                /**
+                 * 强制执行特殊规则（NAI画图正则 & 自动生图世界书）
+                 * 根据 imageGenMode 动态生成对应的正则替换规则
+                 */
+                const enforceSpecialRules = () => {
                     // 1. NAI画图正则 (统一版本)
                     const imageGenRegexName = 'NAI画图正则';
-                    const defaultArtists = '[[[artist:dishwasher1910]]], {{yd_(orange_maru)}}, [artist:ciloranko], [artist:sho_(sho_lwlw)], [ningen mame], year 2024,';
-                    const r18Artists = '{{artist:yd_(orange maru)}}, nixeu, {ikuchan kaoru}, cutesexyrobutts, redrop, [[artist:kojima saya]], lam_(ramdayo), oekakizuki, qiandaiyiyu,';
                     
-                    const targetArtists = settings.imageStyle === 'r18' ? r18Artists : defaultArtists;
-                    
+                    // 使用 getImageGenReplacement 函数获取当前模式的替换 HTML
                     const imageGenRegexContent = {
                         name: imageGenRegexName,
                         regex: '/image###([^>]+)###/g',
-                        replacement: '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(204,229,255,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><img src="https://std.loliyc.com/generate?tag=$1&token=' + imageGenToken + '&model=nai-diffusion-4-5-full&artist=' + targetArtists + '&size=' + settings.imageSize + '&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}}&nocache=0&noise_schedule=karras"  alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; transition: transform 0.3s ease; position: relative; z-index: 1;"></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF);}50% {background-image: linear-gradient(225deg, #FFC9D9, #CCE5FF);}100% {background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF);}}</style>',
+                        // 动态生成替换HTML，$1 代表正则匹配的第一个捕获组（提示词）
+                        replacement: getImageGenReplacement('$1'),
                         placement: [2],
                         markdownOnly: true,
                         promptOnly: false,
@@ -4209,6 +4319,129 @@ ${rawHtml}
                         handleVisualViewportResize();
                     }
                 });
+
+                // ==================== 全局生图触发函数 ====================
+                // 供 HTML 中 onclick 调用，实现 Midjourney 和 DALL-E 的异步图片生成
+                
+                /**
+                 * Midjourney 图片生成触发函数
+                 * 通过代理服务提交任务并轮询结果
+                 */
+                window.triggerMidjourneyGen = async function(element) {
+                    const prompt = element.dataset.prompt;
+                    const baseUrl = element.dataset.baseurl;
+                    const apiKey = element.dataset.apikey;
+                    
+                    // 显示加载状态
+                    element.innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中...</div><div style="color:#666;font-size:12px;margin-top:5px;">请稍候</div></div>';
+                    
+                    try {
+                        // 1. 提交任务
+                        const submitResponse = await fetch(`${baseUrl}/v1/mj/submit/imagine`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`
+                            },
+                            body: JSON.stringify({ prompt: prompt })
+                        });
+                        
+                        if (!submitResponse.ok) {
+                            throw new Error(`提交失败: ${submitResponse.status}`);
+                        }
+                        
+                        const submitData = await submitResponse.json();
+                        const taskId = submitData.task_id || submitData.id;
+                        
+                        if (!taskId) {
+                            throw new Error('未获取到任务ID');
+                        }
+                        
+                        // 2. 轮询任务状态
+                        const maxAttempts = 60; // 最多等待 60 秒
+                        let attempts = 0;
+                        
+                        while (attempts < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            
+                            const statusResponse = await fetch(`${baseUrl}/v1/mj/task/${taskId}`, {
+                                headers: {
+                                    'Authorization': `Bearer ${apiKey}`
+                                }
+                            });
+                            
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.status === 'completed') {
+                                // 成功，显示图片
+                                const imageUrl = statusData.image_url || statusData.result?.[0]?.url;
+                                element.outerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width:100%;height:auto;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);">`;
+                                return;
+                            } else if (statusData.status === 'failed') {
+                                throw new Error(statusData.error || '生成失败');
+                            }
+                            
+                            attempts++;
+                            
+                            // 更新显示状态
+                            element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中... ${attempts}s</div><div style="color:#666;font-size:12px;margin-top:5px;">${statusData.status || '处理中'}</div></div>`;
+                        }
+                        
+                        throw new Error('等待超时，请稍后重试');
+                        
+                    } catch (error) {
+                        element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">❌</div><div style="color:red;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">${error.message}</div></div>`;
+                    }
+                };
+
+                /**
+                 * DALL-E 图片生成触发函数
+                 * 调用 OpenAI 兼容接口生成图片
+                 */
+                window.triggerDalleGen = async function(element) {
+                    const prompt = element.dataset.prompt;
+                    const baseUrl = element.dataset.baseurl;
+                    const apiKey = element.dataset.apikey;
+                    const model = element.dataset.model || 'dall-e-3';
+                    
+                    // 显示加载状态
+                    element.innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中...</div><div style="color:#666;font-size:12px;margin-top:5px;">请稍候</div></div>';
+                    
+                    try {
+                        const response = await fetch(`${baseUrl}/images/generations`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`
+                            },
+                            body: JSON.stringify({
+                                model: model,
+                                prompt: prompt,
+                                size: '1024x1024',
+                                quality: 'standard',
+                                n: 1
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error?.message || `请求失败: ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        const imageUrl = data.data?.[0]?.url;
+                        
+                        if (!imageUrl) {
+                            throw new Error('未获取到图片URL');
+                        }
+                        
+                        // 成功，显示图片
+                        element.outerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width:100%;height:auto;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);">`;
+                        
+                    } catch (error) {
+                        element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">❌</div><div style="color:red;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">${error.message}</div></div>`;
+                    }
+                };
 
                 return {
                     currentView, showMobileMenu, showDescriptionPanel, showModelSelector, modelSelectionTarget, showChatModelSelector, showCharacterEditor, showAddCharacterMenu, showPresetEditor,
