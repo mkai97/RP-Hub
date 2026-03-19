@@ -2324,8 +2324,12 @@
     </div>
 
     <script>
-        document.write('<script src="assets/js/utils.js?v=' + new Date().getTime() + '"><\/script>');
-        document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\/script>');
+        var s1 = document.createElement('script');
+        s1.src = 'assets/js/utils.js?v=' + new Date().getTime();
+        document.head.appendChild(s1);
+        var s2 = document.createElement('script');
+        s2.src = 'assets/js/app.js?v=' + new Date().getTime();
+        document.head.appendChild(s2);
     </script>
 </body>
 </html>

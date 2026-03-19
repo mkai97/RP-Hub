@@ -1454,51 +1454,13 @@
                     opacity: 0
                 });
 
-            // Active Model Type
-            const activeModelType = ref('balanced'); // 'quality', 'balanced', 'fast'
-
-            const setActiveModel = (type) => {
-                activeModelType.value = type;
-                api.model = options.customModels[type];
-                api.stream = true;
-                // Force inform sync if needed (though watch handles it)
-            };
-
-            // Main Settings Sync Listener
-            const setupSyncListener = () => {
-                window.addEventListener('message', (event) => {
-                    const { type, settings: mainSettings } = event.data;
-                    if (type === 'SYNC_SETTINGS' && mainSettings) {
-                        console.log('%c[Settings Sync Received]', 'color: #10b981; font-weight: bold;', mainSettings);
-                        
-                        // Sync API
-                        if (mainSettings.apiUrl) api.url = mainSettings.apiUrl;
-                        if (mainSettings.apiKey) api.key = mainSettings.apiKey;
-                        
-                        // Sync Image Gen
-                        // Always sync key even if empty to ensure reset
-                        options.imageGenKey = mainSettings.imageGenKey || '';
-                        
-                        // Map imageStyle to avatarStyle (vertical -> default, r18 -> hentai)
-                        if (mainSettings.imageStyle === 'r18') {
-                            options.avatarStyle = 'hentai';
-                        } else if (mainSettings.imageStyle === 'vertical') {
-                            options.avatarStyle = 'default';
-                        }
-                        
-                        // Sync Models
-                        if (mainSettings.qualityModel) options.customModels.quality = mainSettings.qualityModel;
-                        if (mainSettings.balancedModel) options.customModels.balanced = mainSettings.balancedModel;
-                        if (mainSettings.fastModel) options.customModels.fast = mainSettings.fastModel;
-                        
-                        // Sync Image Gen Services (Midjourney/OpenAI)
-                        if (mainSettings.imageGenMode) options.imageGenMode = mainSettings.imageGenMode;
-                        if (mainSettings.imageGenServices) {
-                            options.imageGenServices = mainSettings.imageGenServices;
-                        }
-                        
-                        // Update current active api.model
-                        api.model = options.customModels[activeModelType.value] || api.model;
+                const updateGlider = () => {
+                    const activeIndex = tabs.value.findIndex(t => t.id === activeTab.value);
+                    const el = tabElements.value[activeIndex];
+                    if (el) {
+                        gliderStyle.width = `${el.offsetWidth}px`;
+                        gliderStyle.transform = `translateX(${el.offsetLeft}px)`;
+                        gliderStyle.opacity = 1;
                     }
                 };
 
@@ -1592,40 +1554,10 @@
                 if (!options.customModels || typeof options.customModels !== 'object') {
                     options.customModels = { ...defaultOptions.customModels };
                 }
-            };
-            
-            // Call sync setup
-            setupSyncListener();
-
-            // Options with persistence
-            const savedOptions = localStorage.getItem('ai_chargen_options');
-            const defaultOptions = {
-                generateExtra: true, // Default to true as requested
-                avatarStyle: 'default',
-                imageGenKey: '',
-                imageGenMode: 'std',
-                imageGenServices: {
-                    std: { baseUrl: 'https://std.loliyc.com', model: 'nai-diffusion-4-5-full' },
-                    midjourney: { baseUrl: '', apiKey: '', botType: 'MID_JOURNEY' },
-                    openai: { baseUrl: '', apiKey: '', model: 'dall-e-3' }
-                },
-                customModels: {
-                    quality: 'gemini-3.1-pro-preview-high',
-                    balanced: 'gemini-3-flash-preview-high',
-                    fast: 'gemini-3.1-flash-lite-preview-thinking'
-                }
-            };
-            const options = reactive(savedOptions ? { ...defaultOptions, ...JSON.parse(savedOptions) } : defaultOptions);
-            
-            // Validate backward compatibility for customModels
-            if (!options.customModels || typeof options.customModels !== 'object') {
-                options.customModels = { ...defaultOptions.customModels };
-            }
-            if (!options.customModels.quality) options.customModels.quality = defaultOptions.customModels.quality;
-            if (!options.customModels.balanced) options.customModels.balanced = defaultOptions.customModels.balanced;
-            if (!options.customModels.fast) options.customModels.fast = defaultOptions.customModels.fast;
-            if (typeof options.resetOnLoad === 'undefined') options.resetOnLoad = false;
-            
+                if (!options.customModels.quality) options.customModels.quality = defaultOptions.customModels.quality;
+                if (!options.customModels.balanced) options.customModels.balanced = defaultOptions.customModels.balanced;
+                if (!options.customModels.fast) options.customModels.fast = defaultOptions.customModels.fast;
+                if (typeof options.resetOnLoad === 'undefined') options.resetOnLoad = false;
 
 
 
@@ -2624,151 +2556,20 @@
                     cacheAvatar(e.target);
                 };
 
-            // Avatar Helpers
-            const generateAvatarUrl = async (tag) => {
-                const mode = options.imageGenMode || 'std';
-                const services = options.imageGenServices || {};
-                
-                console.log('%c[Workshop Image Request]', 'color: #ec4899; font-weight: bold;', { mode: mode, tag: tag });
-                
-                // Midjourney 模式
-                if (mode === 'midjourney') {
-                    const mjConfig = services.midjourney || {};
-                    const baseUrl = mjConfig.baseUrl;
-                    const apiKey = mjConfig.apiKey;
-                    const botType = mjConfig.botType || 'MID_JOURNEY';
-                    
-                    if (!baseUrl) {
-                        showToast('请先在主页面配置 Midjourney Base URL', 'warning');
-                        return null;
-                    }
-                    
-                    // 显示加载状态
-                    isAvatarLoading.value = true;
-                    
-                    try {
-                        // 提交 Midjourney 任务
-                        const submitResponse = await fetch(`${baseUrl}/mj/submit/imagine`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${apiKey}`
-                            },
-                            body: JSON.stringify({
-                                botType: botType,
-                                prompt: tag,
-                                base64Array: [],
-                                notifyHook: '',
-                                state: ''
-                            })
-                        });
-                        
-                        if (!submitResponse.ok) {
-                            throw new Error(`提交失败: ${submitResponse.status}`);
-                        }
-                        
-                        const submitData = await submitResponse.json();
-                        const taskId = submitData.result;
-                        
-                        if (!taskId) {
-                            throw new Error('未获取到任务ID');
-                        }
-                        
-                        // 轮询任务状态
-                        const maxAttempts = 120;
-                        let attempts = 0;
-                        
-                        while (attempts < maxAttempts) {
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                            
-                            const statusResponse = await fetch(`${baseUrl}/mj/task/${taskId}/fetch`, {
-                                headers: { 'Authorization': `Bearer ${apiKey}` }
-                            });
-                            
-                            const statusData = await statusResponse.json();
-                            
-                            if (statusData.status === 'SUCCESS') {
-                                const imageUrl = statusData.result?.imageUrl;
-                                isAvatarLoading.value = false;
-                                return imageUrl;
-                            } else if (statusData.status === 'FAILURE') {
-                                throw new Error(statusData.result?.failReason || '生成失败');
-                            }
-                            
-                            attempts++;
-                        }
-                        
-                        throw new Error('等待超时');
-                    } catch (e) {
-                        isAvatarLoading.value = false;
-                        showToast('Midjourney 生成失败: ' + e.message, 'error');
-                        return null;
-                    }
-                }
-                
-                // OpenAI DALL-E 模式
-                if (mode === 'openai') {
-                    const openaiConfig = services.openai || {};
-                    const baseUrl = openaiConfig.baseUrl;
-                    const apiKey = openaiConfig.apiKey;
-                    const model = openaiConfig.model || 'dall-e-3';
-                    
-                    if (!baseUrl || !apiKey) {
-                        showToast('请先在主页面配置 OpenAI Base URL 和 API Key', 'warning');
-                        return null;
-                    }
-                    
-                    isAvatarLoading.value = true;
-                    
-                    try {
-                        const response = await fetch(`${baseUrl}/images/generations`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${apiKey}`
-                            },
-                            body: JSON.stringify({
-                                model: model,
-                                prompt: tag,
-                                size: '1024x1024',
-                                quality: 'standard',
-                                n: 1
-                            })
-                        });
-                        
-                        if (!response.ok) {
-                            throw new Error(`生成失败: ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        const imageUrl = data.data?.[0]?.url;
-                        
-                        isAvatarLoading.value = false;
-                        return imageUrl || null;
-                    } catch (e) {
-                        isAvatarLoading.value = false;
-                        showToast('DALL-E 生成失败: ' + e.message, 'error');
-                        return null;
-                    }
-                }
-                
-                // STD 默认模式 (NovelAI)
-                let url;
-                const tokenParam = options.imageGenKey ? options.imageGenKey : 'STD-QMqT4lxiWqWMVneiePiE';
-                if (options.avatarStyle === 'hentai') {
-                    url = `https://std.loliyc.com/generate?tag=${encodeURIComponent(tag)}&token=${tokenParam}&model=nai-diffusion-4-5-full&artist={{artist:yd_(orange maru)}}, nixeu, {ikuchan kaoru}, cutesexyrobutts, redrop, [[artist:kojima saya]], lam_(ramdayo), oekakizuki, qiandaiyiyu, &size=竖图&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}}&nocache=0&noise_schedule=karras`;
-                } else {
-                    url = `https://std.loliyc.com/generate?tag=${encodeURIComponent(tag)}&token=${tokenParam}&model=nai-diffusion-4-5-full&artist=[[[artist:dishwasher1910]]], {{yd_(orange_maru)}}, [artist:ciloranko], [artist:sho_(sho_lwlw)], [ningen mame], year 2024,&size=竖图&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}}&nocache=0&noise_schedule=karras`;
-                }
-                return url;
-            };
+                const onAvatarError = (e) => {
+                    isAvatarLoading.value = false;
+                    console.error('Avatar load error:', e);
+                    showToast('头像加载失败', 'error');
+                };
 
-            const rerollAvatar = async () => {
-                const prompt = currentCharacter.value.avatar_prompt;
-                if (!prompt) {
-                    showToast('当前没有可用的头像提示词', 'warning');
-                    return;
-                }
+                // Watch avatar changes to trigger loading state
+                watch(() => currentCharacter.value.avatar, (newVal) => {
+                    if (newVal && !newVal.startsWith('data:')) {
+                        isAvatarLoading.value = true;
+                    } else {
+                        isAvatarLoading.value = false;
+                    }
+                });
 
                 // Avatar Helpers
                 const generateAvatarUrl = (tag) => {
@@ -2783,28 +2584,12 @@
                     return url;
                 };
 
-                // Randomly swap adjacent tags
-                const idx = Math.floor(Math.random() * (tags.length - 1));
-                const temp = tags[idx];
-                tags[idx] = tags[idx + 1];
-                tags[idx + 1] = temp;
-                
-                const newPrompt = tags.join(', ');
-                currentCharacter.value.avatar_prompt = newPrompt;
-                
-                // Generate new URL (async for Midjourney/OpenAI)
-                const newUrl = await generateAvatarUrl(newPrompt);
-                
-                if (newUrl) {
-                    currentCharacter.value.avatar = newUrl;
-                    showToast('已重新生成头像', 'success');
-                }
-                
-                // Force update avatar
-                currentCharacter.value.avatar = newUrl;
-                
-                showToast('已重新生成头像', 'success');
-            };
+                const rerollAvatar = () => {
+                    const prompt = currentCharacter.value.avatar_prompt;
+                    if (!prompt) {
+                        showToast('当前没有可用的头像提示词', 'warning');
+                        return;
+                    }
 
                     let tags = prompt.split(',').map(t => t.trim()).filter(t => t);
 
