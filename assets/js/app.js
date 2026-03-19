@@ -255,17 +255,18 @@ const { createApp, ref, reactive, computed, onMounted, watch, nextTick } = Vue;
                             apiKey: '', // 使用 imageGenKey
                             model: 'nai-diffusion-4-5-full'
                         },
-                        // Midjourney 代理服务
+                        // Midjourney 代理服务 (new-api)
                         midjourney: {
                             baseUrl: '',
                             apiKey: '',
-                            model: 'midjourney'
+                            botType: 'MID_JOURNEY' // MID_JOURNEY 或 NIJI_JOURNEY
                         },
-                        // OpenAI DALL-E 服务
+                        // OpenAI DALL-E 服务 (new-api)
                         openai: {
                             baseUrl: '',
                             apiKey: '',
-                            model: 'dall-e-3'
+                            model: 'dall-e-3',
+                            models: [] // 存储获取的模型列表
                         }
                     }
                 });
@@ -324,9 +325,14 @@ const { createApp, ref, reactive, computed, onMounted, watch, nextTick } = Vue;
                 }, { deep: true });
 
                 // Watch image gen and model settings for sync
-                watch(() => [settings.imageGenKey, settings.imageStyle, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.suggestionModel], () => {
+                watch(() => [settings.imageGenKey, settings.imageStyle, settings.imageGenMode, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.suggestionModel], () => {
                    syncSettingsToGenerator();
-                });
+                }, { deep: true });
+                
+                // Watch imageGenServices changes
+                watch(() => settings.imageGenServices, () => {
+                    syncSettingsToGenerator();
+                }, { deep: true });
 
                 const currentModelMode = ref('quality');
                 const modelMode = computed({
@@ -601,6 +607,10 @@ const { createApp, ref, reactive, computed, onMounted, watch, nextTick } = Vue;
 
                         const savedSettings = await dbGet('silly_tavern_settings');
                         if (savedSettings) Object.assign(settings, savedSettings);
+                        
+                        // 防御性初始化：确保imageGenServices.midjourney.models和openai.models存在
+                        if (!settings.imageGenServices.midjourney.models) settings.imageGenServices.midjourney.models = [];
+                        if (!settings.imageGenServices.openai.models) settings.imageGenServices.openai.models = [];
 
                         const savedPresets = await dbGet('silly_tavern_presets');
                         if (savedPresets) presets.value = savedPresets;
@@ -1575,19 +1585,26 @@ ${rawHtml}
 
                 // API & Models
                 const fetchModels = async (isManual = false) => {
+                    // 如果没有配置API URL，跳过获取
+                    if (!settings.apiUrl || !settings.apiKey) {
+                        if (isManual) showToast('请先配置 API URL 和 API Key', 'warning');
+                        return;
+                    }
+                    
                     try {
                         if (isManual) showToast('正在获取模型列表...', 'info');
                         const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/models` : `${settings.apiUrl}/v1/models`;
                         const response = await fetch(url, {
                             headers: { 'Authorization': `Bearer ${settings.apiKey}` }
                         });
-                        if (!response.ok) throw new Error('Failed to fetch models');
+                        if (!response.ok) throw new Error('获取失败');
                         const data = await response.json();
                         availableModels.value = data.data || [];
                         if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
                     } catch (error) {
                         console.error(error);
-                        showToast('获取模型失败: ' + error.message, 'error');
+                        // 非手动触发时静默失败，不弹窗
+                        if (isManual) showToast('获取模型失败: ' + error.message, 'error');
                     }
                 };
 
@@ -1705,6 +1722,147 @@ ${rawHtml}
                         console.warn('Image API Status Check Failed:', e);
                         imageGenStatus.value = 'error';
                     }
+                };
+
+                /**
+                 * 获取 Midjourney 模型列表 (new-api)
+                 */
+                const fetchMidjourneyModels = async () => {
+                    const services = settings.imageGenServices;
+                    const baseUrl = services.midjourney.baseUrl;
+                    const apiKey = services.midjourney.apiKey;
+                    
+                    if (!baseUrl) {
+                        showToast('请先配置 Midjourney Base URL', 'warning');
+                        return [];
+                    }
+                    
+                    try {
+                        const controller = new AbortController();
+                        const id = setTimeout(() => controller.abort(), 15000);
+                        
+                        // new-api 的 Midjourney 模型列表接口
+                        const response = await fetch(`${baseUrl}/mj/model/list`, {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${apiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            signal: controller.signal
+                        });
+                        
+                        clearTimeout(id);
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        let models = [];
+                        
+                        if (Array.isArray(data)) {
+                            models = data;
+                        } else if (data.data && Array.isArray(data.data)) {
+                            models = data.data;
+                        } else if (data.models && Array.isArray(data.models)) {
+                            models = data.models;
+                        }
+                        
+                        // 保存到 settings
+                        services.midjourney.models = models;
+                        if (models.length > 0 && !models.includes(services.midjourney.model)) {
+                            services.midjourney.model = models[0];
+                        }
+                        
+                        showToast(`已获取 ${models.length} 个 Midjourney 模型`, 'success');
+                        return models;
+                    } catch (e) {
+                        console.error('获取 Midjourney 模型列表失败:', e);
+                        showToast('获取模型列表失败: ' + e.message, 'error');
+                        return [];
+                    }
+                };
+
+                /**
+                 * 获取 OpenAI/DALL-E 模型列表 (new-api)
+                 */
+                const fetchOpenAIModels = async () => {
+                    const services = settings.imageGenServices;
+                    const baseUrl = services.openai.baseUrl;
+                    const apiKey = services.openai.apiKey;
+                    
+                    if (!baseUrl || !apiKey) {
+                        showToast('请先配置 OpenAI Base URL 和 API Key', 'warning');
+                        return [];
+                    }
+                    
+                    try {
+                        const controller = new AbortController();
+                        const id = setTimeout(() => controller.abort(), 15000);
+                        
+                        // 构建模型列表 URL
+                        let modelsUrl = baseUrl.endsWith('/v1') ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
+                        
+                        const response = await fetch(modelsUrl, {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${apiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            signal: controller.signal
+                        });
+                        
+                        clearTimeout(id);
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        let models = [];
+                        
+                        // 过滤支持图像生成的模型
+                        if (Array.isArray(data.data)) {
+                            models = data.data
+                                .filter(m => m.id && (m.id.includes('dall-e') || m.id.includes('image') || m.id.includes('gpt-image')))
+                                .map(m => m.id);
+                        }
+                        
+                        // 如果没有过滤结果，使用所有模型
+                        if (models.length === 0 && Array.isArray(data.data)) {
+                            models = data.data.map(m => m.id);
+                        }
+                        
+                        // 保存到 settings
+                        services.openai.models = models;
+                        if (models.length > 0 && !models.includes(services.openai.model)) {
+                            // 优先选择 dall-e-3
+                            const dallE3 = models.find(m => m.includes('dall-e-3'));
+                            services.openai.model = dallE3 || models[0];
+                        }
+                        
+                        showToast(`已获取 ${models.length} 个图像模型`, 'success');
+                        return models;
+                    } catch (e) {
+                        console.error('获取 OpenAI 模型列表失败:', e);
+                        showToast('获取模型列表失败: ' + e.message, 'error');
+                        return [];
+                    }
+                };
+
+                /**
+                 * 获取当前模式对应的模型列表
+                 */
+                const fetchImageModels = async () => {
+                    const mode = settings.imageGenMode;
+                    if (mode === 'midjourney') {
+                        // Midjourney 模式不需要获取模型列表，通过 botType 选择
+                        showToast('Midjourney 模式无需获取模型列表，请在"模型"下拉框选择 Bot 类型', 'info');
+                        return [];
+                    } else if (mode === 'openai') {
+                        return await fetchOpenAIModels();
+                    }
+                    return [];
                 };
 
                 const checkAllStatuses = () => {
@@ -2828,9 +2986,10 @@ ${rawHtml}
                     if (mode === 'midjourney') {
                         const baseUrl = services.midjourney.baseUrl || 'https://your-midjourney-proxy.com';
                         const apiKey = services.midjourney.apiKey || 'your-api-key';
+                        const botType = services.midjourney.botType || 'MID_JOURNEY';
                         // Midjourney 使用异步任务方式，返回任务ID后需要轮询获取结果
                         // 这里生成一个占位图，点击后触发实际的API调用
-                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(159,226,191,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><div class="mj-trigger" data-prompt="' + prompt + '" data-baseurl="' + baseUrl + '" data-apikey="' + apiKey + '" onclick="window.triggerMidjourneyGen(this)" style="cursor:pointer;padding:40px;text-align:center;"><div style="font-size:48px;margin-bottom:10px;">🎨</div><div style="color:#333;font-weight:bold;">点击生成图片</div><div style="color:#666;font-size:12px;margin-top:5px;">Mode: Midjourney</div></div></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}50% {background-image: linear-gradient(225deg, #9FE2BF, #7FFFD4);}100% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}}</style>';
+                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(159,226,191,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><div class="mj-trigger" data-prompt="' + prompt + '" data-baseurl="' + baseUrl + '" data-apikey="' + apiKey + '" data-bottype="' + botType + '" onclick="window.triggerMidjourneyGen(this)" style="cursor:pointer;padding:40px;text-align:center;"><div style="font-size:48px;margin-bottom:10px;">🎨</div><div style="color:#333;font-weight:bold;">点击生成图片</div><div style="color:#666;font-size:12px;margin-top:5px;">Bot: ' + botType + '</div></div></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}50% {background-image: linear-gradient(225deg, #9FE2BF, #7FFFD4);}100% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}}</style>';
                     }
                     
                     // OpenAI DALL-E 服务
@@ -2843,6 +3002,188 @@ ${rawHtml}
                     
                     // 默认返回 STD 模式
                     return '';
+                };
+
+                /**
+                 * 调用 Midjourney API 生成图片 (new-api)
+                 */
+                const generateMidjourneyImage = async (prompt, baseUrl, apiKey, model) => {
+                    try {
+                        const response = await fetch(`${baseUrl}/mj/submit/imagine`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${apiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                botType: 'MID_JOURNEY',
+                                prompt: prompt,
+                                base64Array: [],
+                                notifyHook: '',
+                                state: ''
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        
+                        if (data.code === 1 && data.result) {
+                            return data.result;
+                        } else {
+                            throw new Error(data.description || '提交任务失败');
+                        }
+                    } catch (e) {
+                        console.error('Midjourney API Error:', e);
+                        throw e;
+                    }
+                };
+
+                /**
+                 * 轮询 Midjourney 任务状态
+                 */
+                const pollMidjourneyTask = async (taskId, baseUrl, apiKey, maxAttempts = 60) => {
+                    for (let i = 0; i < maxAttempts; i++) {
+                        try {
+                            const response = await fetch(`${baseUrl}/mj/task/${taskId}/fetch`, {
+                                method: 'GET',
+                                headers: {
+                                    'Authorization': `Bearer ${apiKey}`,
+                                    'Content-Type': 'application/json'
+                                }
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error(`HTTP ${response.status}`);
+                            }
+                            
+                            const data = await response.json();
+                            
+                            if (data.status === 'SUCCESS') {
+                                return data;
+                            } else if (data.status === 'FAILURE') {
+                                throw new Error(data.failReason || '生成失败');
+                            }
+                            
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        } catch (e) {
+                            console.error('Poll Error:', e);
+                            throw e;
+                        }
+                    }
+                    
+                    throw new Error('等待超时，请稍后重试');
+                };
+
+                /**
+                 * 调用 OpenAI DALL-E API 生成图片 (new-api)
+                 */
+                const generateDalleImage = async (prompt, baseUrl, apiKey, model) => {
+                    try {
+                        let size = '1024x1024';
+                        if (settings.imageSize === '竖图') size = '1024x1536';
+                        else if (settings.imageSize === '横图') size = '1792x1024';
+                        
+                        const response = await fetch(`${baseUrl}/images/generations`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${apiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                prompt: prompt,
+                                n: 1,
+                                size: size,
+                                model: model
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+                        }
+                        
+                        const data = await response.json();
+                        
+                        if (data.data && data.data.length > 0) {
+                            return data.data[0].url || data.data[0].b64_json;
+                        } else {
+                            throw new Error('未返回图片数据');
+                        }
+                    } catch (e) {
+                        console.error('DALL-E API Error:', e);
+                        throw e;
+                    }
+                };
+
+                /**
+                 * 全局绘图触发函数 (供 onclick 调用)
+                 */
+                window.triggerMidjourneyGen = async function(element) {
+                    const prompt = element.dataset.prompt;
+                    const baseUrl = element.dataset.baseurl;
+                    const apiKey = element.dataset.apikey;
+                    const model = element.dataset.model;
+                    
+                    if (!baseUrl) {
+                        showToast('请先配置 Midjourney Base URL', 'error');
+                        return;
+                    }
+                    
+                    element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">正在生成...</div><div style="color:#666;font-size:12px;margin-top:5px;">提交任务中</div>';
+                    
+                    try {
+                        const taskId = await generateMidjourneyImage(prompt, baseUrl, apiKey, model);
+                        showToast('任务已提交，ID: ' + taskId, 'info');
+                        
+                        element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">正在生成...</div><div style="color:#666;font-size:12px;margin-top:5px;">等待结果中</div>';
+                        
+                        const result = await pollMidjourneyTask(taskId, baseUrl, apiKey);
+                        
+                        const imageUrl = result.imageUrl;
+                        if (imageUrl) {
+                            const container = element.parentElement;
+                            container.innerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; border-radius: 8px;">`;
+                            showToast('图片生成成功!', 'success');
+                        } else {
+                            throw new Error('未获取到图片URL');
+                        }
+                    } catch (e) {
+                        element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">❌</div><div style="color:#333;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">' + e.message + '</div>';
+                        showToast('生成失败: ' + e.message, 'error');
+                    }
+                };
+
+                window.triggerDalleGen = async function(element) {
+                    const prompt = element.dataset.prompt;
+                    const baseUrl = element.dataset.baseurl;
+                    const apiKey = element.dataset.apikey;
+                    const model = element.dataset.model;
+                    
+                    if (!baseUrl || !apiKey) {
+                        showToast('请先配置 OpenAI Base URL 和 API Key', 'error');
+                        return;
+                    }
+                    
+                    element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">正在生成...</div><div style="color:#666;font-size:12px;margin-top:5px;">DALL-E 处理中</div>';
+                    
+                    try {
+                        const imageData = await generateDalleImage(prompt, baseUrl, apiKey, model);
+                        
+                        let imageSrc = imageData;
+                        if (!imageData.startsWith('data:') && !imageData.startsWith('http')) {
+                            imageSrc = 'data:image/png;base64,' + imageData;
+                        }
+                        
+                        const container = element.parentElement;
+                        container.innerHTML = `<img src="${imageSrc}" alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; border-radius: 8px;">`;
+                        showToast('图片生成成功!', 'success');
+                    } catch (e) {
+                        element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">❌</div><div style="color:#333;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">' + e.message + '</div>';
+                        showToast('生成失败: ' + e.message, 'error');
+                    }
                 };
 
                 /**
@@ -4331,19 +4672,26 @@ ${rawHtml}
                     const prompt = element.dataset.prompt;
                     const baseUrl = element.dataset.baseurl;
                     const apiKey = element.dataset.apikey;
+                    const botType = element.dataset.bottype || 'MID_JOURNEY';
                     
                     // 显示加载状态
                     element.innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中...</div><div style="color:#666;font-size:12px;margin-top:5px;">请稍候</div></div>';
                     
                     try {
                         // 1. 提交任务
-                        const submitResponse = await fetch(`${baseUrl}/v1/mj/submit/imagine`, {
+                        const submitResponse = await fetch(`${baseUrl}/mj/submit/imagine`, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Authorization': `Bearer ${apiKey}`
                             },
-                            body: JSON.stringify({ prompt: prompt })
+                            body: JSON.stringify({
+                                botType: botType,
+                                prompt: prompt,
+                                base64Array: [],
+                                notifyHook: '',
+                                state: ''
+                            })
                         });
                         
                         if (!submitResponse.ok) {
@@ -4351,20 +4699,20 @@ ${rawHtml}
                         }
                         
                         const submitData = await submitResponse.json();
-                        const taskId = submitData.task_id || submitData.id;
+                        const taskId = submitData.result;
                         
                         if (!taskId) {
-                            throw new Error('未获取到任务ID');
+                            throw new Error('未获取到任务ID: ' + (submitData.description || '未知错误'));
                         }
                         
                         // 2. 轮询任务状态
-                        const maxAttempts = 60; // 最多等待 60 秒
+                        const maxAttempts = 120; // 最多等待 120 秒
                         let attempts = 0;
                         
                         while (attempts < maxAttempts) {
-                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            await new Promise(resolve => setTimeout(resolve, 2000));
                             
-                            const statusResponse = await fetch(`${baseUrl}/v1/mj/task/${taskId}`, {
+                            const statusResponse = await fetch(`${baseUrl}/mj/task/${taskId}/fetch`, {
                                 headers: {
                                     'Authorization': `Bearer ${apiKey}`
                                 }
@@ -4372,19 +4720,23 @@ ${rawHtml}
                             
                             const statusData = await statusResponse.json();
                             
-                            if (statusData.status === 'completed') {
+                            if (statusData.status === 'SUCCESS') {
                                 // 成功，显示图片
-                                const imageUrl = statusData.image_url || statusData.result?.[0]?.url;
-                                element.outerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width:100%;height:auto;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);">`;
+                                const imageUrl = statusData.result?.imageUrl;
+                                if (imageUrl) {
+                                    element.outerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width:100%;height:auto;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);">`;
+                                } else {
+                                    throw new Error('未获取到图片URL');
+                                }
                                 return;
-                            } else if (statusData.status === 'failed') {
-                                throw new Error(statusData.error || '生成失败');
+                            } else if (statusData.status === 'FAILURE') {
+                                throw new Error(statusData.result?.failReason || '生成失败');
                             }
                             
                             attempts++;
                             
                             // 更新显示状态
-                            element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中... ${attempts}s</div><div style="color:#666;font-size:12px;margin-top:5px;">${statusData.status || '处理中'}</div></div>`;
+                            element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中... ${attempts * 2}s</div><div style="color:#666;font-size:12px;margin-top:5px;">${statusData.status || '处理中'}</div></div>`;
                         }
                         
                         throw new Error('等待超时，请稍后重试');
@@ -4458,7 +4810,7 @@ ${rawHtml}
                     editorTab, characterDisplayLimit, displayedCharacters, loadMoreCharacters,
                     isAutoImageGenEnabled,
                     isGeneratingSuggestions, suggestedReplies, generateSuggestions,
-                    apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
+                    apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, fetchImageModels, // Status Exports
                     showQuotaPanel, quotaValue, quotaLoading, quotaError, quotaAvailable, fetchQuota, // Quota exports
                     toggleMobileMenu: () => showMobileMenu.value = !showMobileMenu.value,
                     scrollToPreviousMessage, scrollToNextMessage,
