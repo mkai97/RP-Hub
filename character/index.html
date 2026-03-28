@@ -1581,10 +1581,6 @@
                             if (mainSettings.apiUrl) api.url = mainSettings.apiUrl;
                             if (mainSettings.apiKey) api.key = mainSettings.apiKey;
 
-                            // 检测 API 类型：Completions API (/completions) vs Chat API (/chat/completions)
-                            api.isCompletions = api.url.includes('/completions') && !api.url.includes('/chat/completions');
-                            console.log('[API Type]', api.isCompletions ? 'Completions API (prompt)' : 'Chat API (messages)');
-
                             // Sync Image Gen
                             // Always sync key even if empty to ensure reset
                             options.imageGenKey = mainSettings.imageGenKey || '';
@@ -1653,8 +1649,7 @@
                     url: 'https://sta1n.zeabur.app/v1',
                     key: 'sk-Vk78S1r6mjBc2YpzFkzcTRMLohBf5jlam4YYeK8WSl4hTszN',
                     model: 'gemini-3.1-pro-preview-high',
-                    stream: true,
-                    isCompletions: false // 默认使用 Chat API
+                    stream: true
                 };
 
                 const savedApi = localStorage.getItem('ai_chargen_api');
@@ -2214,37 +2209,24 @@
                         // Let's use the existing stream logic structure but adapted.
 
                         const baseUrl = api.url.replace(/\/+$/, '');
-                        const isCompletions = api.isCompletions;
-                        const apiUrl = isCompletions 
-                            ? baseUrl 
-                            : (baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`);
-                        
-                        const endpoint = isCompletions ? '/completions' : '/chat/completions';
-                        const requestBody = isCompletions 
-                            ? {
-                                model: api.model,
-                                prompt: `${systemPrompt}\n\n${context}\n\n用户修改指令：${finalPrompt}`,
-                                stream: true,
-                                temperature: 0.7
-                            }
-                            : {
-                                model: api.model,
-                                messages: [
-                                    { role: 'system', content: systemPrompt },
-                                    { role: 'user', content: context + `\n\n用户修改指令：${finalPrompt}` }
-                                ],
-                                stream: true,
-                                temperature: 0.7
-                            };
+                        const apiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
 
-                        console.log('%c[Workshop AI Request]', 'color: #3b82f6; font-weight: bold;', { url: apiUrl + endpoint, model: api.model, type: isCompletions ? 'Completions' : 'Chat' });
-                        const response = await fetch(`${apiUrl}${endpoint}`, {
+                        console.log('%c[Workshop AI Request]', 'color: #3b82f6; font-weight: bold;', { url: apiUrl, model: api.model });
+                        const response = await fetch(`${apiUrl}/chat/completions`, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Authorization': `Bearer ${api.key}`
                             },
-                            body: JSON.stringify(requestBody),
+                            body: JSON.stringify({
+                                model: api.model,
+                                messages: [
+                                    { role: 'system', content: systemPrompt },
+                                    { role: 'user', content: context + `\n\n用户修改指令：${finalPrompt}` }
+                                ],
+                                stream: true, // Use stream for UX
+                                temperature: 0.7 // Slightly lower temp for precision
+                            }),
                             signal: abortController.value.signal
                         });
 
@@ -2264,10 +2246,9 @@
                                 if (line.startsWith('data: ')) {
                                     const data = line.slice(6);
                                     if (data === '[DONE]') continue;
-                            try {
-                                                const json = JSON.parse(data);
-                                                // Chat API: delta.content, Completions API: text
-                                                const content = json.choices[0]?.delta?.content || json.choices[0]?.text || '';
+                                    try {
+                                        const json = JSON.parse(data);
+                                        const content = json.choices[0]?.delta?.content || '';
                                         if (content) {
                                             fullContent += content;
                                             // Update progress simply to show activity
@@ -2892,21 +2873,16 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
 
                         try {
                             const baseUrl = api.url.replace(/\/+$/, '');
-                            const isCompletions = api.isCompletions;
-                            const apiUrl = isCompletions 
-                                ? baseUrl 
-                                : (baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`);
-                            
-                            // 根据 API 类型选择端点和请求格式
-                            const endpoint = isCompletions ? '/completions' : '/chat/completions';
-                            const requestBody = isCompletions 
-                                ? {
-                                    model: api.model,
-                                    prompt: `${systemPrompt}\n\n### 用户的描述\n${prompt.value}\n\n请开始生成。`,
-                                    stream: api.stream,
-                                    temperature: 1
-                                }
-                                : {
+                            const apiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+
+                            console.log('%c[Workshop AI Request]', 'color: #3b82f6; font-weight: bold;', { url: apiUrl, model: api.model });
+                            const response = await fetch(`${apiUrl}/chat/completions`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${api.key}`
+                                },
+                                body: JSON.stringify({
                                     model: api.model,
                                     messages: [
                                         { role: 'system', content: systemPrompt },
@@ -2914,16 +2890,7 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                                     ],
                                     stream: api.stream,
                                     temperature: 1
-                                };
-
-                            console.log('%c[Workshop AI Request]', 'color: #3b82f6; font-weight: bold;', { url: apiUrl + endpoint, model: api.model, type: isCompletions ? 'Completions' : 'Chat' });
-                            const response = await fetch(`${apiUrl}${endpoint}`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${api.key}`
-                                },
-                                body: JSON.stringify(requestBody),
+                                }),
                                 signal: abortController.value.signal
                             });
 
@@ -2955,8 +2922,7 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                                             if (data === '[DONE]') continue;
                                             try {
                                                 const json = JSON.parse(data);
-                                                // Chat API: delta.content, Completions API: text
-                                                const content = json.choices[0]?.delta?.content || json.choices[0]?.text || '';
+                                                const content = json.choices[0]?.delta?.content || '';
                                                 if (content) {
                                                     buffer += content;
                                                     parseBuffer(buffer);
@@ -2968,8 +2934,7 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                                 fullContent = buffer;
                             } else {
                                 const data = await response.json();
-                                // Chat API: message.content, Completions API: text
-                                const content = data.choices[0]?.message?.content || data.choices[0]?.text || '';
+                                const content = data.choices[0]?.message?.content || '';
                                 parseBuffer(content);
                                 fullContent = content;
                             }
@@ -2977,42 +2942,28 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                             // Output full log at the end
                             console.log('%c[AI Full Response]', 'color: #3b82f6; font-weight: bold;', fullContent);
 
-                            // 检测是否为项目专用格式（包含特定标记）
-                            const isProjectFormat = /### (Avatar Prompt|Regex Scripts|World Info)/i.test(fullContent);
+                            // Check for truncation (missing avatar prompt or missing regex scripts when requested)
+                            const hasAvatarPrompt = /<image>[\s\S]*?<\/image>/i.test(fullContent);
 
-                            // 兼容处理：项目专用格式严格要求，纯文本格式宽松处理
-                            let hasAvatarPrompt = true;
+                            // 严格检测：开启额外生成时，不仅要包含正则脚本标题，还必须确认解析后的正则脚本数组非空
                             let hasValidRegex = true;
-
-                            if (isProjectFormat) {
-                                // 项目专用格式：严格检测
-                                hasAvatarPrompt = /<image>[\s\S]*?<\/image>/i.test(fullContent);
-
-                                if (options.generateExtra) {
-                                    const hasRegexHeader = /### Regex Scripts/i.test(fullContent);
-                                    const hasParsedRegex = currentCharacter.value.regexScripts && currentCharacter.value.regexScripts.length > 0;
-                                    hasValidRegex = hasRegexHeader && hasParsedRegex;
-                                }
-                            } else {
-                                // 纯文本格式：宽松处理，跳过头像和额外生成检测
-                                console.log('[兼容模式] 检测到纯文本格式，跳过头像和Regex验证');
-                                hasAvatarPrompt = true;
-                                hasValidRegex = true;
+                            if (options.generateExtra) {
+                                const hasRegexHeader = /### Regex Scripts/i.test(fullContent);
+                                const hasParsedRegex = currentCharacter.value.regexScripts && currentCharacter.value.regexScripts.length > 0;
+                                hasValidRegex = hasRegexHeader && hasParsedRegex;
                             }
 
                             if ((!hasAvatarPrompt || !hasValidRegex) && !isRetry) {
-                                if (isProjectFormat) {
-                                    console.warn(`检测到内容截断: Avatar=${hasAvatarPrompt}, ValidRegex=${hasValidRegex}, Extra=${options.generateExtra}`);
-                                    showToast('检测到内容截断，自动切换非流式重试...', 'warning');
-                                    api.stream = false;
+                                console.warn(`检测到内容截断: Avatar=${hasAvatarPrompt}, ValidRegex=${hasValidRegex}, Extra=${options.generateExtra}`);
+                                showToast('检测到内容截断，自动切换非流式重试...', 'warning');
+                                api.stream = false;
 
-                                    // Small delay
-                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                // Small delay
+                                await new Promise(resolve => setTimeout(resolve, 500));
 
-                                    // Retry
-                                    await performGeneration(true);
-                                    return;
-                                }
+                                // Retry
+                                await performGeneration(true);
+                                return;
                             }
 
                             generationProgress.value = 100;

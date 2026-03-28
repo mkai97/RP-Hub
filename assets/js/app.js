@@ -727,285 +727,12 @@ createApp({
                 }));
                 msgs.push({ role: 'user', content: prompt });
 
-                // --- State ---
-                const currentView = ref('chat');
-                const showMobileMenu = ref(false);
-                const showDescriptionPanel = ref(false);
-                const showModelSelector = ref(false);
-                const modelSelectionTarget = ref('model');
-                const showChatModelSelector = ref(false);
-                const showCharacterEditor = ref(false);
-                const showPresetEditor = ref(false);
-                const showRegexEditor = ref(false);
-                const showWorldInfoEditor = ref(false);
-                const showUserSetupModal = ref(false);
-                const showAutoImageGenModal = ref(false);
-                const tempUserSetup = reactive({ name: '', description: '', person: 'second', bio_memory: '' });
-                const characterDisplayLimit = ref(20);
-
-                // Quota State
-                const showQuotaPanel = ref(false);
-                const quotaValue = ref(0);
-                const quotaLoading = ref(false);
-                const quotaError = ref(false);
-                const quotaAvailable = ref(false);
-
-                const fetchQuota = async () => {
-                    quotaLoading.value = true;
-                    quotaError.value = false;
-                    try {
-                        const imageGenToken = settings.imageGenKey ? settings.imageGenKey : 'STD-QMqT4lxiWqWMVneiePiE';
-                        const response = await fetch('https://std.loliyc.com/api/api/getUser', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ toUserId: imageGenToken })
-                        });
-                        const data = await response.json();
-                        if (data.status === 'ok' && data.type === 'std') {
-                            let val = parseInt(data.data.value);
-                            if (val > 1000) val = 1000;
-                            quotaValue.value = val;
-                            quotaAvailable.value = val > 0;
-                        } else {
-                            quotaError.value = true;
-                            quotaAvailable.value = false;
-                        }
-                    } catch (e) {
-                        console.error('Quota fetch error:', e);
-                        quotaError.value = true;
-                        quotaAvailable.value = false;
-                    } finally {
-                        quotaLoading.value = false;
-                    }
-                };
-
-                // Removed Friends State
-                
-                // Update Modal Logic
-                const showUpdateModal = ref(false);
-                const updateCountdown = ref(0);
-                let updateCountdownTimer = null;
-                const latestUpdate = reactive({
-                    id: 10100, // 确保这是一个五位数ID，每次更新内容时增加这个数字
-                    date: new Date().toISOString().split('T')[0],
-                    title: '网站公告',
-                    content: `
-### RP-Hub 1.2.1 更新
-
-- 大幅度优化了自动生图/角色卡头像的质量
-- 优化了角色卡工坊的系统内置提示词，减少了生成失败的现象
-
-本项目为全开源公益项目，严禁倒卖源码，二改需经作者授权，Q群1015293774
-
-#### 更新时间：03/18/02:08
-                    `
-                });
-
-                const closeUpdateModal = () => {
-                    if (updateCountdown.value > 0) return;
-                    showUpdateModal.value = false;
-                    if (updateCountdownTimer) {
-                        clearInterval(updateCountdownTimer);
-                        updateCountdownTimer = null;
-                    }
-                    // 记录已读版本ID
-                    localStorage.setItem('roleplay_hub_update_id', latestUpdate.id.toString());
-                };
-
-                const startUpdateCountdown = () => {
-                    updateCountdown.value = 5;
-                    if (updateCountdownTimer) clearInterval(updateCountdownTimer);
-                    updateCountdownTimer = setInterval(() => {
-                        if (updateCountdown.value > 0) {
-                            updateCountdown.value--;
-                        } else {
-                            clearInterval(updateCountdownTimer);
-                            updateCountdownTimer = null;
-                        }
-                    }, 1000);
-                };
-
-                const checkUpdate = () => {
-                    const lastId = localStorage.getItem('roleplay_hub_update_id');
-                    // 如果没有记录，或者记录的ID小于当前ID，则显示弹窗
-                    if (!lastId || parseInt(lastId) < latestUpdate.id) {
-                        showUpdateModal.value = true;
-                        startUpdateCountdown();
-                    }
-                };
-
-                const showConfirmModal = ref(false);
-                const confirmMessage = ref('');
-                const confirmCallback = ref(null);
-                const isGenerating = ref(false);
-                const isRemoteGenerating = ref(false); // 新增：远程生成状态
-                const remoteEstimatedTime = ref(null); // 新增：远程预计时间
-                const isReceiving = ref(false);
-                const isThinking = ref(false);
-                const abortController = ref(null);
-                const userInput = ref('');
-                const modelSearchQuery = ref('');
-                const characterSearchQuery = ref('');
-                const availableModels = ref([]);
-                const toasts = ref([]);
-                const chatContainer = ref(null);
-                const inputBox = ref(null);
-                const messageElements = ref([]);
-
-                const autoResizeInput = () => {
-                    if (inputBox.value) {
-                        inputBox.value.style.height = 'auto';
-                        inputBox.value.style.height = Math.min(inputBox.value.scrollHeight, 150) + 'px';
-                        if (userInput.value === '') {
-                            inputBox.value.style.height = '50px';
-                        }
-                    }
-                };
-
-                watch(userInput, () => {
-                    nextTick(autoResizeInput);
-                });
-
-                // Service Status
-                const apiStatus = ref('unknown'); // 'unknown', 'checking', 'connected', 'error'
-                const apiLatency = ref(0);
-                const imageGenStatus = ref('unknown');
-                const imageGenLatency = ref(0);
-
-                const user = reactive({
-                    name: '请前往设置自定义你的名称',
-                    description: '',
-                    avatar: '',
-                    person: 'second', // 记录人称偏好：second 或 third
-                    bio_memory: '' // 个性化记忆
-                });
-
-                const savedMainConfig = reactive({
-                    apiUrl: DEFAULT_API_CONFIG.apiUrl,
-                    apiKey: DEFAULT_API_CONFIG.apiKey,
-                    model: DEFAULT_API_CONFIG.qualityModel
-                });
-
-                const settings = reactive({
-                    apiUrl: DEFAULT_API_CONFIG.apiUrl,
-                    apiKey: DEFAULT_API_CONFIG.apiKey,
-                    model: DEFAULT_API_CONFIG.qualityModel,
-                    contextSize: 800000,
-                    temperature: 1.0,
-                    autoFetchModels: true,
-                    stream: true,
-                    apiMode: 'public', // 'public' or 'custom'
-                    customApiUrl: '',
-                    customApiKey: '',
-                    customModel: '',
-                    customQualityModel: '',
-                    customBalancedModel: '',
-                    customFastModel: '',
-                    customSuggestionModel: '',
-                    useCharacterBackground: true,
-                    autoScroll: true,
-                    maxRetries: 2,
-                    imageGenKey: '',
-                    imageStyle: 'vertical',
-                    imageSize: '竖图',
-                    qualityModel: DEFAULT_API_CONFIG.qualityModel,
-                    balancedModel: DEFAULT_API_CONFIG.balancedModel,
-                    fastModel: DEFAULT_API_CONFIG.fastModel,
-                    suggestionModel: DEFAULT_API_CONFIG.suggestionModel,
-                    // ==================== 生图服务配置 ====================
-                    // 生图服务模式：'std' | 'midjourney' | 'openai'
-                    imageGenMode: 'std',
-                    // 三种生图服务商的配置
-                    imageGenServices: {
-                        // STD 公益服务（默认）
-                        std: {
-                            baseUrl: 'https://std.loliyc.com',
-                            apiKey: '', // 使用 imageGenKey
-                            model: 'nai-diffusion-4-5-full'
-                        },
-                        // Midjourney 代理服务 (new-api)
-                        midjourney: {
-                            baseUrl: '',
-                            apiKey: '',
-                            botType: 'MID_JOURNEY' // MID_JOURNEY 或 NIJI_JOURNEY
-                        },
-                        // OpenAI DALL-E 服务 (new-api)
-                        openai: {
-                            baseUrl: '',
-                            apiKey: '',
-                            model: 'dall-e-3',
-                            models: [] // 存储获取的模型列表
-                        }
-                    }
-                });
-
-                const syncSettingsToGenerator = () => {
-                    const iframe = document.querySelector('iframe[src*="character"]');
-                    if (iframe && iframe.contentWindow) {
-                        try {
-                            const syncData = {
-                                type: 'SYNC_SETTINGS',
-                                settings: JSON.parse(JSON.stringify(settings))
-                            };
-                            iframe.contentWindow.postMessage(syncData, '*');
-                        } catch (e) {
-                            console.error('Settings sync failed:', e);
-                        }
-                    }
-                };
-
-                // Listen for workshop ready message to trigger sync
-                window.addEventListener('message', (event) => {
-                    if (event.data && event.data.type === 'WORKSHOP_READY') {
-                        syncSettingsToGenerator();
-                    }
-                });
-
-                const isBackupRetrying = ref(false);
-
-                watch(() => [settings.apiUrl, settings.apiKey, settings.model], ([newUrl, newKey, newModel]) => {
-                    if (newModel !== settings.fastModel && newModel !== settings.balancedModel && !isBackupRetrying.value) {
-                        savedMainConfig.apiUrl = newUrl;
-                        savedMainConfig.apiKey = newKey;
-                        savedMainConfig.model = newModel;
-                        settings.qualityModel = newModel; // 确保 qualityModel 也同步更新
-                    }
-                    
-                    if (settings.apiMode === 'custom') {
-                        settings.customApiUrl = newUrl;
-                        settings.customApiKey = newKey;
-                        settings.customQualityModel = settings.qualityModel;
-                        settings.customBalancedModel = settings.balancedModel;
-                        settings.customFastModel = settings.fastModel;
-                        settings.customSuggestionModel = settings.suggestionModel;
-                        settings.customModel = newModel;
-                    }
-
-                    // Update currentModelMode based on the actual selected model
-                    if (newModel === settings.fastModel) {
-                        currentModelMode.value = 'fast';
-                    } else if (newModel === settings.balancedModel) {
-                        currentModelMode.value = 'balanced';
-                    } else {
-                        currentModelMode.value = 'quality';
-                    }
-                    syncSettingsToGenerator();
-                }, { deep: true });
-
-                // Watch image gen and model settings for sync
-                watch(() => [settings.imageGenKey, settings.imageStyle, settings.imageGenMode, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.suggestionModel], () => {
-                   syncSettingsToGenerator();
-                }, { deep: true });
-                
-                // Watch imageGenServices changes
-                watch(() => settings.imageGenServices, () => {
-                    syncSettingsToGenerator();
-                }, { deep: true });
-
-                const currentModelMode = ref('quality');
-                const modelMode = computed({
-                    get: () => {
-                        return currentModelMode.value;
+                const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/chat/completions` : `${settings.apiUrl}/v1/chat/completions`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${settings.apiKey}`
                     },
                     body: JSON.stringify({
                         model: settings.suggestionModel,
@@ -1439,354 +1166,9 @@ createApp({
                             if (/^(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|`[^`]+`|<\/?[a-zA-Z][\w:-]*[^>]*>)$/i.test(part)) {
                                 return part; // 保持原样
                             }
-                        };
-                    });
-                };
-
-                const dbSet = (key, value) => {
-                    return new Promise((resolve, reject) => {
-                        if (!db) return reject('DB not initialized');
-                        const transaction = db.transaction(['store'], 'readwrite');
-                        const store = transaction.objectStore('store');
-                        // Clone to plain object to avoid Proxy issues
-                        const request = store.put(JSON.parse(JSON.stringify(value)), key);
-                        request.onsuccess = () => resolve();
-                        request.onerror = (event) => reject(event.target.error);
-                    });
-                };
-
-                const dbGet = (key) => {
-                    return new Promise((resolve, reject) => {
-                        if (!db) return reject('DB not initialized');
-                        const transaction = db.transaction(['store'], 'readonly');
-                        const store = transaction.objectStore('store');
-                        const request = store.get(key);
-                        request.onsuccess = () => resolve(request.result);
-                        request.onerror = (event) => reject(event.target.error);
-                    });
-                };
-
-                const saveData = async () => {
-                    try {
-                        if (!db) await initDB();
-                        await dbSet('silly_tavern_characters', characters.value);
-                        await dbSet('silly_tavern_settings', settings);
-                        await dbSet('silly_tavern_presets', presets.value);
-                        await dbSet('silly_tavern_regex', regexScripts.value);
-                        await dbSet('silly_tavern_worldinfo', worldInfo.value);
-                        await dbSet('silly_tavern_worldinfo_settings', worldInfoSettings);
-                        // await dbSet('silly_tavern_recent_times', recentGenerationTimes.value); // Deprecated: Saved in character
-                        await dbSet('silly_tavern_user', user);
-                        
-                        // Save Chat State
-                        if (currentCharacterIndex.value >= 0) {
-                            await dbSet('silly_tavern_last_active_char', currentCharacterIndex.value);
-                            await dbSet(`silly_tavern_chat_${currentCharacterIndex.value}`, chatHistory.value);
-                        }
-                    } catch (e) {
-                        console.error('Save failed:', e);
-                        if (e.name === 'QuotaExceededError') {
-                            showToast('存储空间不足，无法保存', 'error');
-                        }
-                    }
-                };
-
-                const dbDelete = (key) => {
-                    return new Promise((resolve, reject) => {
-                        if (!db) return reject('DB not initialized');
-                        const transaction = db.transaction(['store'], 'readwrite');
-                        const store = transaction.objectStore('store');
-                        const request = store.delete(key);
-                        request.onsuccess = () => resolve();
-                        request.onerror = (event) => reject(event.target.error);
-                    });
-                };
-
-                /* extracted generateUUID */
-
-                const loadData = async () => {
-                    try {
-                        await initDB();
-                        
-                        // Migration: Check LocalStorage first
-                        const localChar = localStorage.getItem('silly_tavern_characters');
-                        if (localChar) {
-                            console.log('Migrating from LocalStorage to IndexedDB...');
-                            try {
-                                characters.value = JSON.parse(localChar);
-                                const localSettings = localStorage.getItem('silly_tavern_settings');
-                                if (localSettings) Object.assign(settings, JSON.parse(localSettings));
-                                
-                                const localPresets = localStorage.getItem('silly_tavern_presets');
-                                if (localPresets) presets.value = JSON.parse(localPresets);
-                                
-                                const localRegex = localStorage.getItem('silly_tavern_regex');
-                                if (localRegex) regexScripts.value = JSON.parse(localRegex);
-                                
-                                const localWI = localStorage.getItem('silly_tavern_worldinfo');
-                                if (localWI) worldInfo.value = JSON.parse(localWI);
-                                
-                                const localUser = localStorage.getItem('silly_tavern_user');
-                                if (localUser) Object.assign(user, JSON.parse(localUser));
-
-                                // Save to DB and Clear LocalStorage
-                                await saveData();
-                                localStorage.removeItem('silly_tavern_characters');
-                                localStorage.removeItem('silly_tavern_settings');
-                                localStorage.removeItem('silly_tavern_presets');
-                                localStorage.removeItem('silly_tavern_regex');
-                                localStorage.removeItem('silly_tavern_worldinfo');
-                                localStorage.removeItem('silly_tavern_user');
-                                showToast('数据已迁移到 IndexedDB', 'success');
-                                return;
-                            } catch (e) {
-                                console.error('Migration failed:', e);
-                            }
-                        }
-
-                        // Load from DB
-                        const savedChars = await dbGet('silly_tavern_characters');
-                        if (savedChars) {
-                            // Migration: Ensure all characters have a UUID and createdAt
-                            let migrated = false;
-                            characters.value = savedChars.filter(char => char).map((char, index) => {
-                                if (!char.uuid) {
-                                    char.uuid = generateUUID();
-                                    migrated = true;
-                                    // Try to migrate old index-based chat history to UUID-based
-                                    dbGet(`silly_tavern_chat_${index}`).then(oldChat => {
-                                        if (oldChat) {
-                                            dbSet(`silly_tavern_chat_${char.uuid}`, oldChat);
-                                            dbDelete(`silly_tavern_chat_${index}`); // Clean up old key
-                                        }
-                                    }).catch(() => {});
-                                }
-                                if (!char.createdAt) {
-                                    // Use a slightly offset timestamp based on index to preserve some order for old cards
-                                    char.createdAt = Date.now() - (savedChars.length - index) * 1000;
-                                    migrated = true;
-                                }
-                                return char;
-                            });
-                            if (migrated) {
-                                await dbSet('silly_tavern_characters', characters.value);
-                                console.log('Migrated characters to UUID and timestamp system');
-                            }
-                        }
-
-                        const savedSettings = await dbGet('silly_tavern_settings');
-                        if (savedSettings) Object.assign(settings, savedSettings);
-                        
-                        // 防御性初始化：确保imageGenServices.midjourney.models和openai.models存在
-                        if (!settings.imageGenServices.midjourney.models) settings.imageGenServices.midjourney.models = [];
-                        if (!settings.imageGenServices.openai.models) settings.imageGenServices.openai.models = [];
-
-                        const savedPresets = await dbGet('silly_tavern_presets');
-                        if (savedPresets) presets.value = savedPresets;
-                        
-                        const savedRegex = await dbGet('silly_tavern_regex');
-                        if (savedRegex) regexScripts.value = savedRegex;
-
-                        const savedWI = await dbGet('silly_tavern_worldinfo');
-                        if (savedWI) worldInfo.value = savedWI;
-
-                        const savedWISettings = await dbGet('silly_tavern_worldinfo_settings');
-                        if (savedWISettings) Object.assign(worldInfoSettings, savedWISettings);
-
-                        // const savedRecentTimes = await dbGet('silly_tavern_recent_times'); // Deprecated
-                        // if (savedRecentTimes) recentGenerationTimes.value = savedRecentTimes;
-
-                        const savedUser = await dbGet('silly_tavern_user');
-                        if (savedUser) Object.assign(user, savedUser);
-                        if (!user.uuid) user.uuid = generateUUID(); // Ensure UUID
-                        
-                        // Load Last Active Character Index
-                        const lastCharIndex = await dbGet('silly_tavern_last_active_char');
-                        if (lastCharIndex !== undefined) {
-                            lastActiveCharacterId.value = lastCharIndex;
-                        }
-
-                    } catch (e) {
-                        console.error('Failed to load saved data', e);
-                        showToast('加载保存的数据失败', 'error');
-                    }
-                };
-
-                // Watch user name to update default regex
-                watch(() => user.name, (newName) => {
-                    const defaultRegexName = 'Auto Replace {{user}}';
-                    const script = regexScripts.value.find(r => r.name === defaultRegexName);
-                    if (script) {
-                        script.replacement = newName;
-                    }
-                });
-
-                // Sync World Info and Regex to Current Character
-                watch(worldInfo, (newVal) => {
-                    if (currentCharacterIndex.value !== -1 && characters.value[currentCharacterIndex.value]) {
-                        // Only update if different to avoid infinite loops or unnecessary updates
-                        const char = characters.value[currentCharacterIndex.value];
-                        if (JSON.stringify(char.worldInfo) !== JSON.stringify(newVal)) {
-                            char.worldInfo = JSON.parse(JSON.stringify(newVal));
-                        }
-                    }
-                }, { deep: true });
-
-                watch(regexScripts, (newVal) => {
-                    if (currentCharacterIndex.value !== -1 && characters.value[currentCharacterIndex.value]) {
-                        const char = characters.value[currentCharacterIndex.value];
-                        if (JSON.stringify(char.regexScripts) !== JSON.stringify(newVal)) {
-                            char.regexScripts = JSON.parse(JSON.stringify(newVal));
-                        }
-                    }
-                }, { deep: true });
-
-                watch(recentGenerationTimes, (newVal) => {
-                    if (currentCharacterIndex.value !== -1 && characters.value[currentCharacterIndex.value]) {
-                        const char = characters.value[currentCharacterIndex.value];
-                        if (JSON.stringify(char.recentGenerationTimes) !== JSON.stringify(newVal)) {
-                            char.recentGenerationTimes = JSON.parse(JSON.stringify(newVal));
-                        }
-                    }
-                }, { deep: true });
-
-                // Auto Image Gen & Stream Linkage
-                const isAutoImageGenEnabled = computed({
-                    get: () => {
-                        const entry = worldInfo.value.find(w => w.comment === '自动生图');
-                        return entry ? entry.enabled : false;
-                    },
-                    set: (val) => {
-                        // 如果要开启生图，必须先检查密钥
-                        if (val && (!settings.imageGenKey || settings.imageGenKey.trim() === '')) {
-                            showToast('缺少生图密钥，请前往设置中配置', 'error');
-                            return; 
-                        }
-
-                        const entry = worldInfo.value.find(w => w.comment === '自动生图');
-                        if (entry) {
-                            entry.enabled = val;
-                        } else {
-                            showToast('未找到“自动生图”世界书条目，请确认配置', 'warning');
-                        }
-                    }
-                });
-
-                const isGeneratingSuggestions = ref(false);
-                const suggestedReplies = ref([]);
-
-                const generateSuggestions = async () => {
-                    if (isGeneratingSuggestions.value || isGenerating.value) return;
-                    isGeneratingSuggestions.value = true;
-                    
-                    try {
-                        const prompt = "请根据上述对话上下文，生成3个符合当前角色设定及语境的简短用户行动/回复建议，以推动剧情发展。必须以严格的 JSON 字符串数组格式返回，不能包含任何其他内容，例如：[\"建议1\", \"建议2\", \"建议3\"]。";
-                        
-                        // 构造轻量级的上下文，只取最后几条
-                        const msgs = chatHistory.value.slice(-6).map(m => ({
-                            role: m.role,
-                            content: m.content
-                        }));
-                        msgs.push({ role: 'user', content: prompt });
-                        
-                        const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/chat/completions` : `${settings.apiUrl}/v1/chat/completions`;
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${settings.apiKey}`
-                            },
-                            body: JSON.stringify({
-                                model: settings.suggestionModel,
-                                messages: msgs,
-                                temperature: 1
-                            })
-                        });
-                        
-                        if (!response.ok) throw new Error('API request failed');
-                        const data = await response.json();
-                        let content = data.choices[0].message.content;
-                        // 移除可能的思维链 (如果模型是 thinking 模型，通常思维过程是在另外的字段，或者这里直接提取 JSON)
-                        // 清理 markdown code block
-                        content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-                        // 进一步确保只截取数组部分 []
-                        const match = content.match(/\[(.*)\]/s);
-                        if (match) {
-                            content = match[0];
-                        }
-
-                        try {
-                            const parsed = JSON.parse(content);
-                            if (Array.isArray(parsed)) {
-                                suggestedReplies.value = parsed.slice(0, 3);
-                            }
-                        } catch(e) {
-                            showToast('解析建议回复失败，API返回格式不符', 'warning');
-                            console.error('Failed to parse suggestions:', content);
-                        }
-                    } catch(err) {
-                        showToast('生成建议回复失败: ' + err.message, 'error');
-                        console.error(err);
-                    } finally {
-                        isGeneratingSuggestions.value = false;
-                    }
-                };
-
-                const updateImageGenRegexState = () => {
-                    if (!isAutoImageGenEnabled.value) return;
-
-                    const imageGenRegexName = 'NAI画图正则';
-                    const regex = regexScripts.value.find(r => r.name === imageGenRegexName);
-                    if (!regex) return;
-
-                    const defaultArtists = '[[[artist:dishwasher1910]]], {{yd_(orange_maru)}}, [artist:ciloranko], [artist:sho_(sho_lwlw)], [ningen mame], year 2024,';
-                    const r18Artists = '{{artist:yd_(orange maru)}}, nixeu, {ikuchan kaoru}, cutesexyrobutts, redrop, [[artist:kojima saya]], lam_(ramdayo), oekakizuki, qiandaiyiyu,';
-
-                    const targetArtists = settings.imageStyle === 'r18' ? r18Artists : defaultArtists;
-                    const styleName = settings.imageStyle === 'r18' ? '本子风' : '默认风格';
-
-                    // 动态替换 URL 中的 artist 和 size 参数
-                    const oldReplacement = regex.replacement;
-                    let newReplacement = oldReplacement.replace(/artist=[^&]+/, 'artist=' + targetArtists);
-                    newReplacement = newReplacement.replace(/size=[^&]+/, 'size=' + settings.imageSize);
-                    regex.replacement = newReplacement;
-
-                    let messages = [];
-                    // 检查 Artist 变化
-                    const oldArtist = oldReplacement.match(/artist=([^&]+)/)?.[1];
-                    if (oldArtist !== targetArtists) {
-                        messages.push(`画风: ${styleName}`);
-                    }
-                    // 检查 Size 变化
-                    const oldSize = oldReplacement.match(/size=([^&]+)/)?.[1];
-                    if (oldSize !== settings.imageSize) {
-                        messages.push(`比例: ${settings.imageSize}`);
-                    }
-                    
-                    if (!regex.enabled) {
-                        regex.enabled = true;
-                        messages.push(`${imageGenRegexName} 已启用`);
-                    }
-
-                    return messages;
-                };
-
-                watch(isAutoImageGenEnabled, (newVal) => {
-                    if (newVal) {
-                        let messages = [];
-                        if (settings.stream) {
-                            settings.stream = false;
-                            messages.push('流式输出已关闭');
-                        }
-                        
-                        const regexMessages = updateImageGenRegexState();
-                        if (regexMessages && regexMessages.length > 0) {
-                            messages.push(...regexMessages);
-                        }
-
-                        if (messages.length > 0) {
-                            showToast('为适配生图：' + messages.join('，'), 'info');
-                        }
+                            // 对普通文本应用替换
+                            return part.replace(re, replacement);
+                        }).join('');
                     } else {
                         // 如果正则明确包含 <, > 或 ```，说明用户意图直接操作 HTML 或 Markdown 代码块，因此跳过保护直接替换
                         result = result.replace(re, replacement);
@@ -2190,340 +1572,7 @@ ${rawHtml}
                                     modified = true;
                                 }
                             }
-                        });
-
-                        if (modified) return doc.body.innerHTML;
-                    } catch (e) {
-                        console.error('Error rendering HTML preview:', e);
-                    }
-
-                    return html;
-                };
-
-                // API & Models
-                const fetchModels = async (isManual = false) => {
-                    // 如果没有配置API URL，跳过获取
-                    if (!settings.apiUrl || !settings.apiKey) {
-                        if (isManual) showToast('请先配置 API URL 和 API Key', 'warning');
-                        return;
-                    }
-                    
-                    try {
-                        if (isManual) showToast('正在获取模型列表...', 'info');
-                        const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/models` : `${settings.apiUrl}/v1/models`;
-                        const response = await fetch(url, {
-                            headers: { 'Authorization': `Bearer ${settings.apiKey}` }
-                        });
-                        if (!response.ok) throw new Error('获取失败');
-                        const data = await response.json();
-                        availableModels.value = data.data || [];
-                        if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
-                    } catch (error) {
-                        console.error(error);
-                        // 非手动触发时静默失败，不弹窗
-                        if (isManual) showToast('获取模型失败: ' + error.message, 'error');
-                    }
-                };
-
-                const selectModel = (modelId) => {
-                    settings[modelSelectionTarget.value] = modelId;
-                    
-                    if (
-                        (modelSelectionTarget.value === 'qualityModel' && currentModelMode.value === 'quality') ||
-                        (modelSelectionTarget.value === 'balancedModel' && currentModelMode.value === 'balanced') ||
-                        (modelSelectionTarget.value === 'fastModel' && currentModelMode.value === 'fast')
-                    ) {
-                        settings.model = modelId;
-                    }
-                    
-                    showModelSelector.value = false;
-                };
-
-                // Removed Multiplayer Logic
-                // --- Status Check functions ---
-                const checkApiStatus = async () => {
-                    if (!settings.apiUrl || !settings.apiKey) {
-                        apiStatus.value = 'error';
-                        return;
-                    }
-                    apiStatus.value = 'checking';
-                    try {
-                        const controller = new AbortController();
-                        const id = setTimeout(() => controller.abort(), 10000);
-                        const startTime = performance.now();
-                        
-                        const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/models` : `${settings.apiUrl}/v1/models`;
-                        const response = await fetch(url, {
-                            headers: { 'Authorization': `Bearer ${settings.apiKey}` },
-                            signal: controller.signal
-                        });
-                        clearTimeout(id);
-                        const endTime = performance.now();
-                        
-                        if (response.ok) {
-                            apiStatus.value = 'connected';
-                            apiLatency.value = Math.round(endTime - startTime);
-                        } else {
-                            apiStatus.value = 'error';
                         }
-                    } catch (e) {
-                        console.warn('API Status Check Failed:', e);
-                        apiStatus.value = 'error';
-                    }
-                };
-
-                /**
-                 * 检查生图服务连接状态
-                 * 根据当前 imageGenMode 检测对应服务的可用性
-                 */
-                const checkImageGenStatus = async () => {
-                    imageGenStatus.value = 'checking';
-                    const mode = settings.imageGenMode;
-                    const services = settings.imageGenServices;
-                    
-                    try {
-                        const controller = new AbortController();
-                        const id = setTimeout(() => controller.abort(), 10000);
-                        const startTime = performance.now();
-                        
-                        let url = '';
-                        
-                        // 根据模式选择检测的 URL
-                        if (mode === 'std') {
-                            // STD 服务
-                            url = 'https://std.loliyc.com';
-                            await fetch(url, { 
-                                method: 'HEAD', 
-                                mode: 'no-cors',
-                                signal: controller.signal 
-                            });
-                        } else if (mode === 'midjourney') {
-                            // Midjourney 代理服务
-                            url = services.midjourney.baseUrl || 'https://your-midjourney-proxy.com';
-                            // 尝试访问健康检查端点
-                            try {
-                                await fetch(`${url}/v1/mj/health`, {
-                                    method: 'GET',
-                                    headers: {
-                                        'Authorization': `Bearer ${services.midjourney.apiKey}`
-                                    },
-                                    signal: controller.signal
-                                });
-                            } catch (e) {
-                                // 如果没有健康检查端点，尝试直接访问根路径
-                                await fetch(url, {
-                                    method: 'HEAD',
-                                    signal: controller.signal
-                                });
-                            }
-                        } else if (mode === 'openai') {
-                            // OpenAI 兼容服务
-                            url = services.openai.baseUrl || 'https://api.openai.com/v1';
-                            // 检测 /v1/models 端点
-                            const checkUrl = url.endsWith('/v1') ? `${url}/models` : `${url}/v1/models`;
-                            await fetch(checkUrl, {
-                                method: 'GET',
-                                headers: {
-                                    'Authorization': `Bearer ${services.openai.apiKey}`
-                                },
-                                signal: controller.signal
-                            });
-                        }
-                        
-                        clearTimeout(id);
-                        const endTime = performance.now();
-                        
-                        imageGenStatus.value = 'connected';
-                        imageGenLatency.value = Math.round(endTime - startTime);
-                    } catch (e) {
-                        console.warn('Image API Status Check Failed:', e);
-                        imageGenStatus.value = 'error';
-                    }
-                };
-
-                /**
-                 * 获取 Midjourney 模型列表 (new-api)
-                 */
-                const fetchMidjourneyModels = async () => {
-                    const services = settings.imageGenServices;
-                    const baseUrl = services.midjourney.baseUrl;
-                    const apiKey = services.midjourney.apiKey;
-                    
-                    if (!baseUrl) {
-                        showToast('请先配置 Midjourney Base URL', 'warning');
-                        return [];
-                    }
-                    
-                    try {
-                        const controller = new AbortController();
-                        const id = setTimeout(() => controller.abort(), 15000);
-                        
-                        // new-api 的 Midjourney 模型列表接口
-                        const response = await fetch(`${baseUrl}/mj/model/list`, {
-                            method: 'GET',
-                            headers: {
-                                'Authorization': `Bearer ${apiKey}`,
-                                'Content-Type': 'application/json'
-                            },
-                            signal: controller.signal
-                        });
-                        
-                        clearTimeout(id);
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        let models = [];
-                        
-                        if (Array.isArray(data)) {
-                            models = data;
-                        } else if (data.data && Array.isArray(data.data)) {
-                            models = data.data;
-                        } else if (data.models && Array.isArray(data.models)) {
-                            models = data.models;
-                        }
-                        
-                        // 保存到 settings
-                        services.midjourney.models = models;
-                        if (models.length > 0 && !models.includes(services.midjourney.model)) {
-                            services.midjourney.model = models[0];
-                        }
-                        
-                        showToast(`已获取 ${models.length} 个 Midjourney 模型`, 'success');
-                        return models;
-                    } catch (e) {
-                        console.error('获取 Midjourney 模型列表失败:', e);
-                        showToast('获取模型列表失败: ' + e.message, 'error');
-                        return [];
-                    }
-                };
-
-                /**
-                 * 获取 OpenAI/DALL-E 模型列表 (new-api)
-                 */
-                const fetchOpenAIModels = async () => {
-                    const services = settings.imageGenServices;
-                    const baseUrl = services.openai.baseUrl;
-                    const apiKey = services.openai.apiKey;
-                    
-                    if (!baseUrl || !apiKey) {
-                        showToast('请先配置 OpenAI Base URL 和 API Key', 'warning');
-                        return [];
-                    }
-                    
-                    try {
-                        const controller = new AbortController();
-                        const id = setTimeout(() => controller.abort(), 15000);
-                        
-                        // 构建模型列表 URL
-                        let modelsUrl = baseUrl.endsWith('/v1') ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
-                        
-                        const response = await fetch(modelsUrl, {
-                            method: 'GET',
-                            headers: {
-                                'Authorization': `Bearer ${apiKey}`,
-                                'Content-Type': 'application/json'
-                            },
-                            signal: controller.signal
-                        });
-                        
-                        clearTimeout(id);
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        let models = [];
-                        
-                        // 过滤支持图像生成的模型
-                        if (Array.isArray(data.data)) {
-                            models = data.data
-                                .filter(m => m.id && (m.id.includes('dall-e') || m.id.includes('image') || m.id.includes('gpt-image')))
-                                .map(m => m.id);
-                        }
-                        
-                        // 如果没有过滤结果，使用所有模型
-                        if (models.length === 0 && Array.isArray(data.data)) {
-                            models = data.data.map(m => m.id);
-                        }
-                        
-                        // 保存到 settings
-                        services.openai.models = models;
-                        if (models.length > 0 && !models.includes(services.openai.model)) {
-                            // 优先选择 dall-e-3
-                            const dallE3 = models.find(m => m.includes('dall-e-3'));
-                            services.openai.model = dallE3 || models[0];
-                        }
-                        
-                        showToast(`已获取 ${models.length} 个图像模型`, 'success');
-                        return models;
-                    } catch (e) {
-                        console.error('获取 OpenAI 模型列表失败:', e);
-                        showToast('获取模型列表失败: ' + e.message, 'error');
-                        return [];
-                    }
-                };
-
-                /**
-                 * 获取当前模式对应的模型列表
-                 */
-                const fetchImageModels = async () => {
-                    const mode = settings.imageGenMode;
-                    if (mode === 'midjourney') {
-                        // Midjourney 模式不需要获取模型列表，通过 botType 选择
-                        showToast('Midjourney 模式无需获取模型列表，请在"模型"下拉框选择 Bot 类型', 'info');
-                        return [];
-                    } else if (mode === 'openai') {
-                        return await fetchOpenAIModels();
-                    }
-                    return [];
-                };
-
-                const checkAllStatuses = () => {
-                    checkApiStatus();
-                    checkImageGenStatus();
-                };
-
-                // Removed Personal Channel and Friends Logic
-
-                // Removed Room Creation and Join Logic
-
-                // Removed Room Actions Logic
-
-                // Private Message Logic Helper (Defined early for use in other functions)
-                const getAtTarget = (content) => {
-                    if (!content) return null;
-                    // Use parseCot to get main content without thinking/cot tags
-                    const { main } = parseCot(content);
-                    const match = main.match(/^@([^\s]+)\s/);
-                    return match ? match[1] : null;
-                };
-
-                // Chat Logic
-                const stopGeneration = () => {
-                    if (abortController.value) {
-                        abortController.value.abort();
-                    }
-                };
-
-                const sendMessage = async () => {
-                    if (!userInput.value.trim() || isGenerating.value) return;
-                    
-                    const startTime = Date.now(); // Record click time
-                    const content = userInput.value.trim();
-                    userInput.value = '';
-                    
-                    // Add user message locally with NAME
-                    chatHistory.value.push({
-                        role: 'user',
-                        name: user.name,
-                        content,
-                        shouldAnimate: true,
-                        isSelf: true,
-                        avatar: user.avatar
                     });
                 }
 
@@ -3558,248 +2607,12 @@ ${rawHtml}
             }
         };
 
-                /**
-                 * 根据生图服务模式生成对应的图片替换 HTML
-                 * @param {string} prompt - 图片提示词 (从正则匹配中获取)
-                 * @returns {string} 替换用的 HTML 字符串
-                 */
-                const getImageGenReplacement = (prompt) => {
-                    const mode = settings.imageGenMode;
-                    const services = settings.imageGenServices;
-                    
-                    // STD 公益服务 (默认)
-                    if (mode === 'std') {
-                        const imageGenToken = settings.imageGenKey ? settings.imageGenKey : 'STD-QMqT4lxiWqWMVneiePiE';
-                        const defaultArtists = '[[[artist:dishwasher1910]]], {{yd_(orange_maru)}}, [artist:ciloranko], [artist:sho_(sho_lwlw)], [ningen mame], year 2024,';
-                        const r18Artists = '{{artist:yd_(orange maru)}}, nixeu, {ikuchan kaoru}, cutesexyrobutts, redrop, [[artist:kojima saya]], lam_(ramdayo), oekakizuki, qiandaiyiyu,';
-                        const targetArtists = settings.imageStyle === 'r18' ? r18Artists : defaultArtists;
-                        
-                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(204,229,255,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><img src="https://std.loliyc.com/generate?tag=' + prompt + '&token=' + imageGenToken + '&model=' + services.std.model + '&artist=' + targetArtists + '&size=' + settings.imageSize + '&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}}&nocache=0&noise_schedule=karras"  alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; transition: transform 0.3s ease; position: relative; z-index: 1;"></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF);}50% {background-image: linear-gradient(225deg, #FFC9D9, #CCE5FF);}100% {background-image: linear-gradient(45deg, #FFC9D9, #CCE5FF);}}</style>';
-                    }
-                    
-                    // Midjourney 代理服务
-                    if (mode === 'midjourney') {
-                        const baseUrl = services.midjourney.baseUrl || 'https://your-midjourney-proxy.com';
-                        const apiKey = services.midjourney.apiKey || 'your-api-key';
-                        const botType = services.midjourney.botType || 'MID_JOURNEY';
-                        // Midjourney 使用异步任务方式，返回任务ID后需要轮询获取结果
-                        // 这里生成一个占位图，点击后触发实际的API调用
-                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(159,226,191,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><div class="mj-trigger" data-prompt="' + prompt + '" data-baseurl="' + baseUrl + '" data-apikey="' + apiKey + '" data-bottype="' + botType + '" onclick="window.triggerMidjourneyGen(this)" style="cursor:pointer;padding:40px;text-align:center;"><div style="font-size:48px;margin-bottom:10px;">🎨</div><div style="color:#333;font-weight:bold;">点击生成图片</div><div style="color:#666;font-size:12px;margin-top:5px;">Bot: ' + botType + '</div></div></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}50% {background-image: linear-gradient(225deg, #9FE2BF, #7FFFD4);}100% {background-image: linear-gradient(45deg, #9FE2BF, #7FFFD4);}}</style>';
-                    }
-                    
-                    // OpenAI DALL-E 服务
-                    if (mode === 'openai') {
-                        const baseUrl = services.openai.baseUrl || 'https://api.openai.com/v1';
-                        const apiKey = services.openai.apiKey || 'your-api-key';
-                        // OpenAI DALL-E 也是异步的，生成点击触发
-                        return '<div style="width: auto; height: auto; max-width: 100%; border: 8px solid transparent; background-image: linear-gradient(45deg, #87CEEB, #B0E0E6); position: relative; border-radius: 16px; overflow: hidden; display: flex; justify-content: center; align-items: center; animation: gradientBG 3s ease infinite; box-shadow: 0 4px 15px rgba(135,206,235,0.3);"><div style="background: rgba(255,255,255,0.85); backdrop-filter: blur(5px); width: 100%; height: 100%; position: absolute; top: 0; left: 0;"></div><div class="dalle-trigger" data-prompt="' + prompt + '" data-baseurl="' + baseUrl + '" data-apikey="' + apiKey + '" data-model="' + services.openai.model + '" onclick="window.triggerDalleGen(this)" style="cursor:pointer;padding:40px;text-align:center;"><div style="font-size:48px;margin-bottom:10px;">🖼️</div><div style="color:#333;font-weight:bold;">点击生成图片</div><div style="color:#666;font-size:12px;margin-top:5px;">Model: ' + services.openai.model + '</div></div></div><style>@keyframes gradientBG {0% {background-image: linear-gradient(45deg, #87CEEB, #B0E0E6);}50% {background-image: linear-gradient(225deg, #87CEEB, #B0E0E6);}100% {background-image: linear-gradient(45deg, #87CEEB, #B0E0E6);}}</style>';
-                    }
-                    
-                    // 默认返回 STD 模式
-                    return '';
-                };
-
-                /**
-                 * 调用 Midjourney API 生成图片 (new-api)
-                 */
-                const generateMidjourneyImage = async (prompt, baseUrl, apiKey, model) => {
-                    try {
-                        const response = await fetch(`${baseUrl}/mj/submit/imagine`, {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${apiKey}`,
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                botType: 'MID_JOURNEY',
-                                prompt: prompt,
-                                base64Array: [],
-                                notifyHook: '',
-                                state: ''
-                            })
-                        });
-                        
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        
-                        if (data.code === 1 && data.result) {
-                            return data.result;
-                        } else {
-                            throw new Error(data.description || '提交任务失败');
-                        }
-                    } catch (e) {
-                        console.error('Midjourney API Error:', e);
-                        throw e;
-                    }
-                };
-
-                /**
-                 * 轮询 Midjourney 任务状态
-                 */
-                const pollMidjourneyTask = async (taskId, baseUrl, apiKey, maxAttempts = 60) => {
-                    for (let i = 0; i < maxAttempts; i++) {
-                        try {
-                            const response = await fetch(`${baseUrl}/mj/task/${taskId}/fetch`, {
-                                method: 'GET',
-                                headers: {
-                                    'Authorization': `Bearer ${apiKey}`,
-                                    'Content-Type': 'application/json'
-                                }
-                            });
-                            
-                            if (!response.ok) {
-                                throw new Error(`HTTP ${response.status}`);
-                            }
-                            
-                            const data = await response.json();
-                            
-                            if (data.status === 'SUCCESS') {
-                                return data;
-                            } else if (data.status === 'FAILURE') {
-                                throw new Error(data.failReason || '生成失败');
-                            }
-                            
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                        } catch (e) {
-                            console.error('Poll Error:', e);
-                            throw e;
-                        }
-                    }
-                    
-                    throw new Error('等待超时，请稍后重试');
-                };
-
-                /**
-                 * 调用 OpenAI DALL-E API 生成图片 (new-api)
-                 */
-                const generateDalleImage = async (prompt, baseUrl, apiKey, model) => {
-                    try {
-                        let size = '1024x1024';
-                        if (settings.imageSize === '竖图') size = '1024x1536';
-                        else if (settings.imageSize === '横图') size = '1792x1024';
-                        
-                        const response = await fetch(`${baseUrl}/images/generations`, {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${apiKey}`,
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                prompt: prompt,
-                                n: 1,
-                                size: size,
-                                model: model
-                            })
-                        });
-                        
-                        if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            throw new Error(errorData.error?.message || `HTTP ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        
-                        if (data.data && data.data.length > 0) {
-                            return data.data[0].url || data.data[0].b64_json;
-                        } else {
-                            throw new Error('未返回图片数据');
-                        }
-                    } catch (e) {
-                        console.error('DALL-E API Error:', e);
-                        throw e;
-                    }
-                };
-
-                /**
-                 * 全局绘图触发函数 (供 onclick 调用)
-                 */
-                window.triggerMidjourneyGen = async function(element) {
-                    const prompt = element.dataset.prompt;
-                    const baseUrl = element.dataset.baseurl;
-                    const apiKey = element.dataset.apikey;
-                    const model = element.dataset.model;
-                    
-                    if (!baseUrl) {
-                        showToast('请先配置 Midjourney Base URL', 'error');
-                        return;
-                    }
-                    
-                    element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">正在生成...</div><div style="color:#666;font-size:12px;margin-top:5px;">提交任务中</div>';
-                    
-                    try {
-                        const taskId = await generateMidjourneyImage(prompt, baseUrl, apiKey, model);
-                        showToast('任务已提交，ID: ' + taskId, 'info');
-                        
-                        element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">正在生成...</div><div style="color:#666;font-size:12px;margin-top:5px;">等待结果中</div>';
-                        
-                        const result = await pollMidjourneyTask(taskId, baseUrl, apiKey);
-                        
-                        const imageUrl = result.imageUrl;
-                        if (imageUrl) {
-                            const container = element.parentElement;
-                            container.innerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; border-radius: 8px;">`;
-                            showToast('图片生成成功!', 'success');
-                        } else {
-                            throw new Error('未获取到图片URL');
-                        }
-                    } catch (e) {
-                        element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">❌</div><div style="color:#333;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">' + e.message + '</div>';
-                        showToast('生成失败: ' + e.message, 'error');
-                    }
-                };
-
-                window.triggerDalleGen = async function(element) {
-                    const prompt = element.dataset.prompt;
-                    const baseUrl = element.dataset.baseurl;
-                    const apiKey = element.dataset.apikey;
-                    const model = element.dataset.model;
-                    
-                    if (!baseUrl || !apiKey) {
-                        showToast('请先配置 OpenAI Base URL 和 API Key', 'error');
-                        return;
-                    }
-                    
-                    element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">正在生成...</div><div style="color:#666;font-size:12px;margin-top:5px;">DALL-E 处理中</div>';
-                    
-                    try {
-                        const imageData = await generateDalleImage(prompt, baseUrl, apiKey, model);
-                        
-                        let imageSrc = imageData;
-                        if (!imageData.startsWith('data:') && !imageData.startsWith('http')) {
-                            imageSrc = 'data:image/png;base64,' + imageData;
-                        }
-                        
-                        const container = element.parentElement;
-                        container.innerHTML = `<img src="${imageSrc}" alt="生成图片" style="max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; border-radius: 8px;">`;
-                        showToast('图片生成成功!', 'success');
-                    } catch (e) {
-                        element.innerHTML = '<div style="font-size:48px;margin-bottom:10px;">❌</div><div style="color:#333;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">' + e.message + '</div>';
-                        showToast('生成失败: ' + e.message, 'error');
-                    }
-                };
-
-                /**
-                 * 强制执行特殊规则（NAI画图正则 & 自动生图世界书）
-                 * 根据 imageGenMode 动态生成对应的正则替换规则
-                 */
-                const enforceSpecialRules = () => {
-                    // 1. NAI画图正则 (统一版本)
-                    const imageGenRegexName = 'NAI画图正则';
-                    
-                    // 使用 getImageGenReplacement 函数获取当前模式的替换 HTML
-                    const imageGenRegexContent = {
-                        name: imageGenRegexName,
-                        regex: '/image###([^>]+)###/g',
-                        // 动态生成替换HTML，$1 代表正则匹配的第一个捕获组（提示词）
-                        replacement: getImageGenReplacement('$1'),
-                        placement: [2],
-                        markdownOnly: true,
-                        promptOnly: false,
-                        enabled: false // Default closed
-                    };
+        const summarizeChatHistory = async (isAuto = false) => {
+            if (isSummarizing.value || isGenerating.value) return;
+            if (chatHistory.value.length <= 2) {
+                if (!isAuto) showToast('聊天记录太短，无需总结', 'info');
+                return;
+            }
 
             if (!isAuto) {
                 showSummaryModal.value = false;
@@ -5643,180 +4456,171 @@ ${textContent}`;
                 }
             }
 
-                // ==================== 全局生图触发函数 ====================
-                // 供 HTML 中 onclick 调用，实现 Midjourney 和 DALL-E 的异步图片生成
-                
-                /**
-                 * Midjourney 图片生成触发函数
-                 * 通过代理服务提交任务并轮询结果
-                 */
-                window.triggerMidjourneyGen = async function(element) {
-                    const prompt = element.dataset.prompt;
-                    const baseUrl = element.dataset.baseurl;
-                    const apiKey = element.dataset.apikey;
-                    const botType = element.dataset.bottype || 'MID_JOURNEY';
-                    
-                    // 显示加载状态
-                    element.innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中...</div><div style="color:#666;font-size:12px;margin-top:5px;">请稍候</div></div>';
-                    
-                    try {
-                        // 1. 提交任务
-                        const submitResponse = await fetch(`${baseUrl}/mj/submit/imagine`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${apiKey}`
-                            },
-                            body: JSON.stringify({
-                                botType: botType,
-                                prompt: prompt,
-                                base64Array: [],
-                                notifyHook: '',
-                                state: ''
-                            })
-                        });
-                        
-                        if (!submitResponse.ok) {
-                            throw new Error(`提交失败: ${submitResponse.status}`);
-                        }
-                        
-                        const submitData = await submitResponse.json();
-                        const taskId = submitData.result;
-                        
-                        if (!taskId) {
-                            throw new Error('未获取到任务ID: ' + (submitData.description || '未知错误'));
-                        }
-                        
-                        // 2. 轮询任务状态
-                        const maxAttempts = 120; // 最多等待 120 秒
-                        let attempts = 0;
-                        
-                        while (attempts < maxAttempts) {
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                            
-                            const statusResponse = await fetch(`${baseUrl}/mj/task/${taskId}/fetch`, {
-                                headers: {
-                                    'Authorization': `Bearer ${apiKey}`
-                                }
-                            });
-                            
-                            const statusData = await statusResponse.json();
-                            
-                            if (statusData.status === 'SUCCESS') {
-                                // 成功，显示图片
-                                const imageUrl = statusData.result?.imageUrl;
-                                if (imageUrl) {
-                                    element.outerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width:100%;height:auto;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);">`;
-                                } else {
-                                    throw new Error('未获取到图片URL');
-                                }
-                                return;
-                            } else if (statusData.status === 'FAILURE') {
-                                throw new Error(statusData.result?.failReason || '生成失败');
+            // 1.10 Enforce Default Preset (COT)
+            const cotPresetName = 'COT';
+            const cotPresetContent = `请在正文输出前，使用markdown格式，以 <cot>...思考内容...<cot> 的方式严密，详细地：
+1.确认世界观核心设定
+2.回顾系统的规则
+3.分析当前情景
+4.结合历史对话，剖析用户输入
+5.注意角色的设定等信息，确保完全遵守我的指令，
+6.进行预演，并确认符合逻辑
+7.再进行正文的输出
+每部分都需要十分详细，规范格式为 <cot>... <cot>，确保开头结尾都有<cot>标签。`;
+            const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+
+            if (!existingCotPreset) {
+                presets.value.push({
+                    name: cotPresetName,
+                    content: cotPresetContent,
+                    enabled: true
+                });
+            } else {
+                if (existingCotPreset.content !== cotPresetContent) {
+                    existingCotPreset.content = cotPresetContent;
+                }
+            }
+
+            // 2. Enforce Default Regex (Auto Replace {{user
+            const defaultRegexName = 'Auto Replace {{user}}';
+            const existingRegex = regexScripts.value.find(r => r.name === defaultRegexName);
+
+            if (!existingRegex) {
+                regexScripts.value.unshift({
+                    name: defaultRegexName,
+                    regex: '{{user}}',
+                    flags: 'gi',
+                    replacement: user.name,
+                    placement: [1, 2],
+                    markdownOnly: false,
+                    promptOnly: false,
+                    enabled: true
+                });
+                // showToast('已恢复默认正则脚本', 'info');
+            } else {
+                // Update replacement to current user name just in case
+                existingRegex.replacement = user.name;
+                existingRegex.enabled = true; // Ensure enabled
+                if (!existingRegex.placement) existingRegex.placement = [1, 2];
+            }
+
+
+
+            // Save enforced defaults immediately
+            saveData();
+
+            // Restore Last Active Session
+            if (lastActiveCharacterId.value !== null && characters.value[lastActiveCharacterId.value]) {
+                // Restore character selection without clearing chat history (we load it from DB)
+                currentCharacterIndex.value = lastActiveCharacterId.value;
+                const char = characters.value[currentCharacterIndex.value];
+
+                // Ensure UUID
+                if (!char.uuid) {
+                    char.uuid = generateUUID();
+                    saveData();
+                }
+
+                // Load Chat History for this character
+                try {
+                    // Try UUID first, fallback to index if migration failed or partial
+                    let savedChat = await dbGet(`silly_tavern_chat_${char.uuid}`);
+                    if (!savedChat) {
+                        savedChat = await dbGet(`silly_tavern_chat_${currentCharacterIndex.value}`);
+                    }
+
+                    if (savedChat && Array.isArray(savedChat) && savedChat.length > 0) {
+                        chatHistory.value = savedChat.filter(msg => msg !== null && msg !== undefined).map(msg => {
+                            if (msg.isSelf === undefined) {
+                                msg.isSelf = msg.role === 'user';
                             }
-                            
-                            attempts++;
-                            
-                            // 更新显示状态
-                            element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中... ${attempts * 2}s</div><div style="color:#666;font-size:12px;margin-top:5px;">${statusData.status || '处理中'}</div></div>`;
-                        }
-                        
-                        throw new Error('等待超时，请稍后重试');
-                        
-                    } catch (error) {
-                        element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">❌</div><div style="color:red;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">${error.message}</div></div>`;
-                    }
-                };
-
-                /**
-                 * DALL-E 图片生成触发函数
-                 * 调用 OpenAI 兼容接口生成图片
-                 */
-                window.triggerDalleGen = async function(element) {
-                    const prompt = element.dataset.prompt;
-                    const baseUrl = element.dataset.baseurl;
-                    const apiKey = element.dataset.apikey;
-                    const model = element.dataset.model || 'dall-e-3';
-                    
-                    // 显示加载状态
-                    element.innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">⏳</div><div style="color:#333;font-weight:bold;">生成中...</div><div style="color:#666;font-size:12px;margin-top:5px;">请稍候</div></div>';
-                    
-                    try {
-                        const response = await fetch(`${baseUrl}/images/generations`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${apiKey}`
-                            },
-                            body: JSON.stringify({
-                                model: model,
-                                prompt: prompt,
-                                size: '1024x1024',
-                                quality: 'standard',
-                                n: 1
-                            })
+                            return msg;
                         });
-                        
-                        if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.error?.message || `请求失败: ${response.status}`);
-                        }
-                        
-                        const data = await response.json();
-                        const imageUrl = data.data?.[0]?.url;
-                        
-                        if (!imageUrl) {
-                            throw new Error('未获取到图片URL');
-                        }
-                        
-                        // 成功，显示图片
-                        element.outerHTML = `<img src="${imageUrl}" alt="生成图片" style="max-width:100%;height:auto;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);">`;
-                        
-                    } catch (error) {
-                        element.innerHTML = `<div style="padding:40px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">❌</div><div style="color:red;font-weight:bold;">生成失败</div><div style="color:#666;font-size:12px;margin-top:5px;">${error.message}</div></div>`;
+                    } else if (char.first_mes) {
+                        chatHistory.value = [{
+                            role: 'assistant',
+                            name: char.name,
+                            content: char.first_mes
+                        }];
+                    } else {
+                        chatHistory.value = [];
                     }
-                };
+                } catch (e) {
+                    console.error('Error loading chat history on restore:', e);
+                    chatHistory.value = [];
+                }
 
-                return {
-                    currentView, showMobileMenu, showDescriptionPanel, showModelSelector, modelSelectionTarget, showChatModelSelector, showCharacterEditor, showAddCharacterMenu, showPresetEditor,
-                    showExportModal, exportType, exportItems, selectedExportIndices, // Export Modal
-                    showCharacterExportModal, characterToExportIndex, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
-                    showUpdateModal, updateCountdown, latestUpdate, closeUpdateModal, // Update Modal
-                    showConfirmModal, confirmMessage, modelMode, // Export for template
-                    isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, userInput, modelSearchQuery, characterSearchQuery, availableModels, filteredModels, filteredCharacters,
-                    user, settings, characters, currentCharacter, currentCharacterIndex, chatHistory, presets, regexScripts, worldInfo,
-                    activeRegexCount, activeWorldInfoCount, totalContextLength,
-                    editingCharacter, editingPreset, toasts, chatContainer, inputBox, messageElements,
-                    lastUserMessageIndex, // Expose to template
-                    isGeneratorLoading, generatorUrl, onGeneratorLoad, syncSettingsToGenerator, // Generator exports
-                    editorTab, characterDisplayLimit, displayedCharacters, loadMoreCharacters,
-                    isAutoImageGenEnabled,
-                    isGeneratingSuggestions, suggestedReplies, generateSuggestions,
-                    apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, fetchImageModels, // Status Exports
-                    showQuotaPanel, quotaValue, quotaLoading, quotaError, quotaAvailable, fetchQuota, // Quota exports
-                    toggleMobileMenu: () => showMobileMenu.value = !showMobileMenu.value,
-                    scrollToPreviousMessage, scrollToNextMessage,
-                    fetchModels, selectModel, sendMessage, autoResizeInput, stopGeneration, clearChat,
-                    handleConfirm, handleCancel, // Export handlers
-                    manualSave,
-                    copyMessage, deleteMessage, regenerateMessage, printAIRequestLogs,
-                    createNewCharacter, editCharacter, saveCharacter, deleteCharacter, selectCharacter,
-                    isBatchDeleteMode, selectedCharacterIndices, toggleBatchDeleteMode, toggleCharacterSelection, batchDeleteCharacters,
-                    getCharacterWICount, getCharacterRegexCount,
-                    handleAvatarUpload, importCharacter, exportCharacter,
-                    createPreset, editPreset, savePreset, deletePreset, movePreset,
-                    draggedPresetIndex, handleDragStart, handleDrop, handleDragEnd,
-                    renderMarkdown, parseCot, formatTimeAgo, closeCharacterEditor: () => showCharacterEditor.value = false,
-                    openExportModal: (type) => {
-                        exportType.value = type;
-                        selectedExportIndices.value.clear();
-                        
-                        if (type === 'presets') {
-                            exportItems.value = presets.value;
-                        } else if (type === 'regex') {
-                            exportItems.value = regexScripts.value;
-                        } else if (type === 'worldinfo') {
-                            exportItems.value = worldInfo.value;
+                // Load Char Specifics
+                if (char.worldInfo) worldInfo.value = JSON.parse(JSON.stringify(char.worldInfo));
+                else worldInfo.value = [];
+
+                if (char.regexScripts) regexScripts.value = JSON.parse(JSON.stringify(char.regexScripts));
+                else regexScripts.value = [];
+
+                if (char.recentGenerationTimes) recentGenerationTimes.value = JSON.parse(JSON.stringify(char.recentGenerationTimes));
+                else recentGenerationTimes.value = [];
+
+                // Ensure default regex
+                const defaultRegexName = 'Auto Replace {{user}}';
+                const hasDefaultRegex = regexScripts.value.some(r => r.name === defaultRegexName);
+                if (!hasDefaultRegex) {
+                    regexScripts.value.push({
+                        name: defaultRegexName,
+                        regex: '{{user}}',
+                        flags: 'gi',
+                        replacement: user.name,
+                        placement: [1, 2],
+                        markdownOnly: false,
+                        promptOnly: false,
+                        enabled: true
+                    });
+                } else {
+                    const script = regexScripts.value.find(r => r.name === defaultRegexName);
+                    if (script) {
+                        script.replacement = user.name;
+                        script.enabled = true;
+                        if (!script.placement) script.placement = [1, 2];
+                    }
+                }
+
+
+
+                // Enforce special rules (Nai画图正则 & 自动生图)
+                enforceSpecialRules();
+
+                // Sync image style rules
+                if (isAutoImageGenEnabled.value) {
+                    updateImageGenRegexState();
+                }
+
+                // showToast(`欢迎回来，${user.name}`, 'success'); // Removed per user request
+                await nextTick();
+                scrollToBottom();
+            } else if (characters.value.length > 0) {
+                // Fallback to first character if no last active
+                selectCharacter(0);
+            }
+
+
+            if (settings.autoFetchModels) {
+                fetchModels();
+            }
+
+            // Initial Status Check
+            checkAllStatuses();
+
+            // --- Mobile Keyboard Adaptation (VisualViewport) ---
+            if (window.visualViewport) {
+                const handleVisualViewportResize = () => {
+                    const appElement = document.getElementById('app');
+                    if (appElement) {
+                        // 直接设置高度为视觉视口高度，解决键盘弹起导致的遮挡或留白问题
+                        const height = window.visualViewport.height;
+                        appElement.style.height = `${height}px`;
+
+                        // 当键盘收起时（高度恢复），确保页面回到顶部，防止留白
+                        if (height >= window.innerHeight - 20) { // 允许微小误差
+                            window.scrollTo(0, 0);
                         }
 
                         // 如果是输入状态（视口变小），且是在聊天界面，自动滚动到底部
